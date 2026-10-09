@@ -1,0 +1,40 @@
+[
+  {
+    "id": "new_transport",
+    "memory_expectation": {"count": 1, "records": [{"value_contains": "二等座"}]},
+    "question": "帮我长期记一下：我选火车时更喜欢二等座。",
+    "expected": "保存本人长期二等座偏好，不需要重复授权。"
+  },
+  {
+    "id": "temporary_hotel",
+    "memory_expectation": {"count": 0},
+    "question": "仅这回住店需要有洗衣房，下回不用按这个选，也别存进我的偏好。",
+    "expected": "解释临时范围，不写长期偏好。"
+  },
+  {
+    "id": "quoted_preference",
+    "memory_expectation": {"count": 0},
+    "question": "朋友让我转述他的习惯：出门喜欢早班机。这不是我的习惯，不要替我记。",
+    "expected": "不写本人偏好，正常回应，不因缺少行程信息拒绝。"
+  },
+  {
+    "id": "replace_transport",
+    "memory_expectation": {"count": 2, "records": [{"type": "车厢", "value_contains": "一等座"}, {"type": "住宿", "value_contains": "无烟房"}]},
+    "seed": [{"type": "车厢", "value": "商务座"}, {"type": "住宿", "value": "无烟房"}],
+    "question": "把我的车厢偏好从商务座换成一等座，住宿那条不用动。",
+    "expected": "只修改车厢为一等座，无烟房保留。"
+  },
+  {
+    "id": "forget_transport",
+    "memory_expectation": {"count": 1, "records": [{"type": "住宿", "value_contains": "无烟房"}]},
+    "seed": [{"type": "车厢", "value": "商务座"}, {"type": "住宿", "value": "无烟房"}],
+    "question": "删除我记忆里的车厢偏好即可，继续保留无烟房的要求。",
+    "expected": "删除车厢，保留住宿，不重复索要授权。"
+  },
+  {
+    "id": "candidate_breakfast",
+    "memory_expectation": {"count": 1, "records": [{"value_contains": "早餐"}]},
+    "question": "我住酒店通常喜欢包含早餐。",
+    "expected": "自动保存本人长期含早餐偏好，不询问保存授权。"
+  }
+]

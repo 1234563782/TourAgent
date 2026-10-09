@@ -1,0 +1,55 @@
+{
+  "generated_at": "2026-09-27T14:49:03.787042+00:00",
+  "mode": "deterministic_test_evidence",
+  "case_count": 52,
+  "mapped_case_count": 52,
+  "mapping_coverage": 1.0,
+  "executed_case_count": 52,
+  "execution_coverage": 1.0,
+  "passed_case_count": 52,
+  "evidence_pass_rate": 1.0,
+  "status_counts": {
+    "passed": 52
+  },
+  "hard_gate_failures": [],
+  "critical_blocked_cases": [],
+  "release_gate_passed": true,
+  "by_category": {
+    "concurrency_budget": {
+      "passed": 8
+    },
+    "memory_revision": {
+      "passed": 8
+    },
+    "policy_rag": {
+      "passed": 10
+    },
+    "recovery_idempotency": {
+      "passed": 8
+    },
+    "routing": {
+      "passed": 10
+    },
+    "tool_safety": {
+      "passed": 8
+    }
+  },
+  "by_case_type": {
+    "adversarial": {
+      "passed": 2
+    },
+    "edge": {
+      "passed": 16
+    },
+    "fault_injection": {
+      "passed": 11
+    },
+    "golden": {
+      "passed": 14
+    },
+    "regression": {
+      "passed": 9
+    }
+  },
+  "interpretation": "This report executes synthetic regression evidence. It does not measure live-model language quality or claim direct prompt-level accuracy."
+}

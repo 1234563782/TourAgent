@@ -59,3 +59,11 @@ data/models/*/
 # Personal settings
 .claude/claudian-settings.json
 .claude/settings.local.json
+
+# Local provider verification tools and outputs
+.verification/
+.venv/
+.env
+.env.*
+!.env.example
+data/graph/

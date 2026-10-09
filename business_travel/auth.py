@@ -1,0 +1,238 @@
+"""Password accounts and revocable, tenant-scoped PostgreSQL sessions."""
+
+import hashlib
+import re
+import secrets
+import uuid
+from dataclasses import dataclass
+from pathlib import Path
+from urllib.parse import urlsplit
+
+from pwdlib import PasswordHash
+
+from .memory_pg import MemoryIdentity, memory_connection
+from .settings import read_environment
+
+PASSWORD_HASH = PasswordHash.recommended()
+DUMMY_HASH = PASSWORD_HASH.hash(secrets.token_urlsafe(32))
+COOKIE_NAME = "travel_session"
+
+
+@dataclass(frozen=True)
+class AuthSettings:
+    origin: str = "http://127.0.0.1:8000"
+    session_seconds: int = 28800
+    rate_seconds: int = 300
+    rate_limit: int = 30
+    max_failures: int = 10
+    lock_seconds: int = 900
+
+    def __post_init__(self):
+        parsed = urlsplit(self.origin)
+        if (parsed.scheme not in {"http", "https"} or not parsed.hostname
+                or parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment):
+            raise ValueError("TRAVEL_WEB_ORIGIN must be an origin without a path")
+        try:
+            parsed.port
+        except ValueError:
+            raise ValueError("Invalid web origin port") from None
+        if parsed.scheme == "http" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+            raise ValueError("Non-loopback web deployments require HTTPS")
+        if not (300 <= self.session_seconds <= 86400 and 10 <= self.rate_seconds <= 3600
+                and 1 <= self.rate_limit <= 100 and 1 <= self.max_failures <= 20
+                and 60 <= self.lock_seconds <= 86400):
+            raise ValueError("Invalid authentication limits")
+
+    @property
+    def secure_cookie(self):
+        return self.origin.startswith("https://")
+
+    @classmethod
+    def from_env(cls):
+        env = read_environment(Path(__file__).resolve().parent.parent / ".env")
+        return cls(
+            origin=env.get("TRAVEL_WEB_ORIGIN") or cls.origin,
+            session_seconds=int(env.get("TRAVEL_AUTH_SESSION_SECONDS") or cls.session_seconds),
+            rate_seconds=int(env.get("TRAVEL_AUTH_RATE_SECONDS") or cls.rate_seconds),
+            rate_limit=int(env.get("TRAVEL_AUTH_RATE_LIMIT") or cls.rate_limit),
+            max_failures=int(env.get("TRAVEL_AUTH_MAX_FAILURES") or cls.max_failures),
+            lock_seconds=int(env.get("TRAVEL_AUTH_LOCK_SECONDS") or cls.lock_seconds),
+        )
+
+
+class LoginLimited(Exception):
+    pass
+
+
+def username_value(value: str) -> str:
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_-]{3,64}", value):
+        raise ValueError("Username must contain 3-64 ASCII letters, digits, underscores or hyphens")
+    return value.lower()
+
+
+def hash_password(password: str) -> str:
+    if not isinstance(password, str) or not 12 <= len(password) <= 128 or not password.strip():
+        raise ValueError("Password must contain 12-128 characters and cannot be blank")
+    return PASSWORD_HASH.hash(password)
+
+
+def token_digest(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def setup_auth(settings):
+    """Requires the explicit memory initialization step to have created the schema."""
+    with memory_connection(settings) as connection, connection.transaction():
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS auth_users (
+                company_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                username TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                active BOOLEAN NOT NULL DEFAULT true,
+                failed_attempts INTEGER NOT NULL DEFAULT 0,
+                locked_until TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (company_id, user_id),
+                UNIQUE (company_id, username)
+            )
+        """)
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS auth_sessions (
+                token_hash TEXT PRIMARY KEY,
+                company_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                expires_at TIMESTAMPTZ NOT NULL,
+                FOREIGN KEY (company_id, user_id)
+                    REFERENCES auth_users(company_id, user_id) ON DELETE CASCADE
+            )
+        """)
+        connection.execute("CREATE INDEX IF NOT EXISTS auth_sessions_user "
+                           "ON auth_sessions(company_id,user_id)")
+        connection.execute("CREATE INDEX IF NOT EXISTS auth_sessions_expiry ON auth_sessions(expires_at)")
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS auth_login_limits (
+                company_id TEXT NOT NULL,
+                client_hash TEXT NOT NULL,
+                attempts INTEGER NOT NULL,
+                expires_at TIMESTAMPTZ NOT NULL,
+                PRIMARY KEY (company_id, client_hash)
+            )
+        """)
+
+
+class AuthStore:
+    def __init__(self, settings, config: AuthSettings):
+        self.settings = settings
+        self.config = config
+        self.company = settings.memory_company_id
+
+    def check(self):
+        with memory_connection(self.settings) as connection:
+            connection.execute("SELECT user_id FROM auth_users LIMIT 0")
+            connection.execute("SELECT token_hash FROM auth_sessions LIMIT 0")
+            connection.execute("SELECT client_hash FROM auth_login_limits LIMIT 0")
+
+    def create_user(self, username, password):
+        username = username_value(username)
+        encoded = hash_password(password)
+        user_id = uuid.uuid4().hex
+        with memory_connection(self.settings) as connection:
+            connection.execute(
+                "INSERT INTO auth_users(company_id,user_id,username,password_hash) VALUES(%s,%s,%s,%s)",
+                (self.company, user_id, username, encoded),
+            )
+        return MemoryIdentity(self.company, user_id)
+
+    def manage_user(self, username, *, password=None, active=None):
+        username = username_value(username)
+        encoded = hash_password(password) if password is not None else None
+        with memory_connection(self.settings) as connection, connection.transaction():
+            row = connection.execute(
+                "SELECT user_id FROM auth_users WHERE company_id=%s AND username=%s FOR UPDATE",
+                (self.company, username),
+            ).fetchone()
+            if row is None:
+                raise ValueError("Account not found")
+            connection.execute(
+                "UPDATE auth_users SET password_hash=COALESCE(%s,password_hash), "
+                "active=COALESCE(%s,active),failed_attempts=0,locked_until=NULL "
+                "WHERE company_id=%s AND user_id=%s",
+                (encoded, active, self.company, row["user_id"]),
+            )
+            connection.execute("DELETE FROM auth_sessions WHERE company_id=%s AND user_id=%s",
+                               (self.company, row["user_id"]))
+
+    def login(self, username, password, client):
+        username = username_value(username)
+        with memory_connection(self.settings) as connection:
+            # Atomic fixed windows work across processes; do not trust forwarded IP headers.
+            rate = connection.execute(
+                "INSERT INTO auth_login_limits(company_id,client_hash,attempts,expires_at) "
+                "VALUES(%s,%s,1,now()+%s*interval '1 second') "
+                "ON CONFLICT(company_id,client_hash) DO UPDATE SET "
+                "attempts=CASE WHEN auth_login_limits.expires_at<=now() THEN 1 "
+                "ELSE auth_login_limits.attempts+1 END, "
+                "expires_at=CASE WHEN auth_login_limits.expires_at<=now() THEN excluded.expires_at "
+                "ELSE auth_login_limits.expires_at END RETURNING attempts",
+                (self.company, token_digest(client), self.config.rate_seconds),
+            ).fetchone()
+            if rate["attempts"] > self.config.rate_limit:
+                raise LoginLimited()
+            with connection.transaction():
+                user = connection.execute(
+                    "SELECT *, locked_until>now() AS locked FROM auth_users "
+                    "WHERE company_id=%s AND username=%s FOR UPDATE", (self.company, username),
+                ).fetchone()
+                valid = PASSWORD_HASH.verify(password, user["password_hash"] if user else DUMMY_HASH)
+                if user is None:
+                    return None
+                if not user["active"] or user["locked"]:
+                    return None
+                if not valid:
+                    connection.execute(
+                        "UPDATE auth_users SET failed_attempts="
+                        "CASE WHEN locked_until IS NOT NULL THEN 1 ELSE failed_attempts+1 END, "
+                        "locked_until=CASE WHEN "
+                        "(CASE WHEN locked_until IS NOT NULL THEN 1 ELSE failed_attempts+1 END)>=%s "
+                        "THEN now()+%s*interval '1 second' ELSE NULL END "
+                        "WHERE company_id=%s AND user_id=%s",
+                        (self.config.max_failures, self.config.lock_seconds, self.company, user["user_id"]),
+                    )
+                    return None
+                connection.execute(
+                    "UPDATE auth_users SET failed_attempts=0,locked_until=NULL "
+                    "WHERE company_id=%s AND user_id=%s", (self.company, user["user_id"]),
+                )
+                token = secrets.token_urlsafe(32)
+                connection.execute(
+                    "INSERT INTO auth_sessions(token_hash,company_id,user_id,expires_at) "
+                    "VALUES(%s,%s,%s,now()+%s*interval '1 second')",
+                    (token_digest(token), self.company, user["user_id"], self.config.session_seconds),
+                )
+                return token
+
+    def current_user(self, token):
+        if not isinstance(token, str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}", token):
+            return None
+        with memory_connection(self.settings) as connection:
+            return connection.execute(
+                "SELECT u.company_id,u.user_id,u.username FROM auth_sessions s "
+                "JOIN auth_users u USING(company_id,user_id) "
+                "WHERE s.token_hash=%s AND s.company_id=%s AND s.expires_at>now() AND u.active",
+                (token_digest(token), self.company),
+            ).fetchone()
+
+    def logout(self, token):
+        if isinstance(token, str) and len(token) <= 128:
+            with memory_connection(self.settings) as connection:
+                connection.execute("DELETE FROM auth_sessions WHERE token_hash=%s AND company_id=%s",
+                                   (token_digest(token), self.company))
+
+    def prune(self):
+        with memory_connection(self.settings) as connection, connection.transaction():
+            connection.execute("DELETE FROM auth_sessions WHERE company_id=%s AND expires_at<=now()",
+                               (self.company,))
+            connection.execute("DELETE FROM auth_login_limits WHERE company_id=%s AND expires_at<=now()",
+                               (self.company,))

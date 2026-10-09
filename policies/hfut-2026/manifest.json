@@ -1,0 +1,33 @@
+{
+  "name": "合肥工业大学差旅政策资料包",
+  "policy_key": "hfut_travel",
+  "version": "2026-project-v1",
+  "effective_from": "2026-01-01",
+  "effective_to": "2026-12-31",
+  "adoption_note": "按项目所有者指定，将所给学校办法及住宿附表作为2026年项目适用政策；保留原文日期，不宣称已外部核实现行法律效力。",
+  "chunk_size": 1400,
+  "sources": [
+    {"id": "body", "role": "body", "path": "合肥工业大学差旅费管理办法.docx"},
+    {"id": "lodging", "role": "lodging", "path": "P020160413407739028766.xls"}
+  ],
+  "snapshot": "lodging-sheet.json",
+  "rules": "reviewed-rules.json",
+  "attachment_clauses": ["第十二条", "第十三条", "第十四条"],
+  "warnings": [
+    "项目采用2026年口径，不修改原文发布日期。",
+    "交通一二三类不等于住宿部级、司局级、其他人员；住宿档次必须单独确认。",
+    "住宿附表单位为元/人·天；合住房价不自动平均分摊。",
+    "Sheet3为修改建议调查表，未导入。",
+    "只作参考规划和政策核对，不执行审批、下单或保险理赔。",
+    "补助核验仅计算所述日期的一般标准，不自动计算连续在途超过12小时等特殊追加补助。"
+  ],
+  "layout": {
+    "sheet": "Sheet1",
+    "unit_row": 5, "unit_column": 4, "unit_label": "单位:元/人·天",
+    "header_row": 8, "grades": ["部级", "司局级", "其他人员"],
+    "first_row": 9, "last_row": 94,
+    "group_column": 1, "region_column": 2, "locality_column": 3,
+    "cap_columns": [4, 5, 6], "season_region_column": 7,
+    "season_column": 8, "season_cap_columns": [9, 10, 11]
+  }
+}

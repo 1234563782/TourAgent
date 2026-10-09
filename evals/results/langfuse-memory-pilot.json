@@ -1,0 +1,262 @@
+{
+  "dataset": "touragent-memory-dev-ab94227412c6",
+  "source_sha256": "ab94227412c6d484fbc80240832d56ba3cb04cdfffc9a364c5ce1cad9f98aa48",
+  "scope": "real_graph_isolated_memory_not_web_e2e",
+  "review_status": "draft_requires_human_review",
+  "results": [
+    {
+      "case_id": "explicit_delete",
+      "output": {
+        "status": "completed",
+        "answer": "已记住你的偏好。",
+        "preferences": {
+          "items": [
+            {
+              "type": "座位",
+              "value": "靠过道",
+              "scope": "long_term"
+            }
+          ]
+        },
+        "tools": [
+          {
+            "name": "query_memory",
+            "status": null
+          },
+          {
+            "name": "edit_preferences",
+            "status": "saved"
+          }
+        ],
+        "execution_failures": [],
+        "duration_seconds": 8.782
+      },
+      "score": {
+        "status": "passed",
+        "passed": true,
+        "failures": []
+      }
+    },
+    {
+      "case_id": "explicit_update",
+      "output": {
+        "status": "completed",
+        "answer": "已记住你的偏好。",
+        "preferences": {
+          "items": [
+            {
+              "type": "酒店",
+              "value": "带健身房",
+              "scope": "long_term"
+            },
+            {
+              "type": "座位",
+              "value": "靠过道",
+              "scope": "long_term"
+            }
+          ]
+        },
+        "tools": [
+          {
+            "name": "query_memory",
+            "status": null
+          },
+          {
+            "name": "edit_preferences",
+            "status": "saved"
+          }
+        ],
+        "execution_failures": [],
+        "duration_seconds": 8.422
+      },
+      "score": {
+        "status": "passed",
+        "passed": true,
+        "failures": []
+      }
+    },
+    {
+      "case_id": "candidate",
+      "output": {
+        "status": "completed",
+        "answer": "已记住你的偏好。",
+        "preferences": {
+          "items": [
+            {
+              "type": "酒店隔音要求",
+              "value": "比较在意隔音",
+              "scope": "long_term"
+            }
+          ]
+        },
+        "tools": [
+          {
+            "name": "query_memory",
+            "status": null
+          },
+          {
+            "name": "save_preferences",
+            "status": "saved"
+          }
+        ],
+        "execution_failures": [],
+        "duration_seconds": 6.609
+      },
+      "score": {
+        "status": "passed",
+        "passed": true,
+        "failures": []
+      }
+    },
+    {
+      "case_id": "hypothetical",
+      "output": {
+        "status": "completed",
+        "answer": "明白，您明确表示这只是一个假设性问题，不需要我实际保存任何偏好。\n\n如果未来您真的希望我记住“喜欢红眼航班”这一长期偏好，我的处理流程如下：\n\n1.  **查询现有记忆**：首先调用 `query_memory` 检查是否已存在相关或冲突的偏好记录，确保类型命名一致且避免重复。\n2.  **内容审核与写入**：确认这是您本人的实际长期偏好后，调用 `save_preferences`，并附带当前对话中的原文引用作为上下文依据。系统会自动进行内容审核，只有审核通过才会真正持久化。\n3.  **结果确认**：只有在工具返回成功结果后，我才会告知您偏好已保存；若审核未通过或工具不可用，我会如实说明未能保存，而不会声称操作成功。\n4.  **区分临时与长期**：如果该需求仅针对某次具体行程（而非长期习惯），我不会将其写入长期偏好，而是作为当前行程的临时要求处理。\n\n再次强调，本次仅为假设探讨，未执行任何保存操作。如果您有其他问题或需要调整真实偏好，请随时告诉我。",
+        "preferences": {
+          "items": []
+        },
+        "tools": [],
+        "execution_failures": [],
+        "duration_seconds": 7.656
+      },
+      "score": {
+        "status": "passed",
+        "passed": true,
+        "failures": []
+      }
+    },
+    {
+      "case_id": "temporary",
+      "output": {
+        "status": "completed",
+        "answer": "好的，已收到。您这次高铁希望坐靠窗座位，且明确不作为长期偏好保存。该需求仅适用于本次行程，不会写入您的长期记忆。",
+        "preferences": {
+          "items": []
+        },
+        "tools": [],
+        "execution_failures": [],
+        "duration_seconds": 3.891
+      },
+      "score": {
+        "status": "passed",
+        "passed": true,
+        "failures": []
+      }
+    },
+    {
+      "case_id": "other_person",
+      "output": {
+        "status": "completed",
+        "answer": "您提到这是替同事询问的偏好，属于他人信息。根据规则，我不能将他人的习惯或偏好保存为您的长期记忆。\n\n不过，我可以就“出差选择连锁酒店是否合适”为您提供一般性参考：连锁酒店通常具备标准化服务、稳定的卫生与安全标准、以及企业协议价等优势，在差旅合规和报销流程上也更便捷。如果您同事有具体的出行需求（如目的地、日期、预算等），也可以进一步协助查询符合条件的住宿选项。\n\n请问您是希望了解连锁酒店的通用优势，还是有其他具体需求需要帮助？",
+        "preferences": {
+          "items": []
+        },
+        "tools": [],
+        "execution_failures": [],
+        "duration_seconds": 7.36
+      },
+      "score": {
+        "status": "passed",
+        "passed": true,
+        "failures": []
+      }
+    },
+    {
+      "case_id": "explicit_add",
+      "output": {
+        "status": "completed",
+        "answer": "本次内容不适合保存为您的长期偏好，未写入。",
+        "preferences": {
+          "items": []
+        },
+        "tools": [
+          {
+            "name": "query_memory",
+            "status": null
+          },
+          {
+            "name": "save_preferences",
+            "status": "rejected"
+          }
+        ],
+        "execution_failures": [],
+        "duration_seconds": 7.125
+      },
+      "score": {
+        "status": "failed",
+        "passed": false,
+        "failures": [
+          "memory_count_mismatch",
+          "memory_record_mismatch"
+        ]
+      }
+    }
+  ],
+  "run_name": "memory-1f330a5c6c4d42f9b115acce03b4c227",
+  "url": "https://jp.cloud.langfuse.com/project/cmu2pk8z9001tad0ds7910edc/datasets/cmubc13lo003nad0dj6w98ypt/runs/7f732386-609f-466c-b819-4b6bd8bd97bb",
+  "remote_run_items": 7,
+  "passed": 6,
+  "completed": 7,
+  "cloud_verification": {
+    "items": [
+      {
+        "dataset_item_id": "bdc2d16c-36ae-5d8f-b678-12038af10470",
+        "scores_match": true,
+        "scores": {
+          "execution_status": "failed",
+          "memory_contract": 0.0
+        }
+      },
+      {
+        "dataset_item_id": "4324b28b-4dd8-5f3b-b14a-dd5c9d88c47a",
+        "scores_match": true,
+        "scores": {
+          "memory_contract": 1.0,
+          "execution_status": "passed"
+        }
+      },
+      {
+        "dataset_item_id": "58d808ef-2240-5712-a09a-ba807d3b4a01",
+        "scores_match": true,
+        "scores": {
+          "memory_contract": 1.0,
+          "execution_status": "passed"
+        }
+      },
+      {
+        "dataset_item_id": "00e17b5d-3d67-572b-83a5-848bb17dc34d",
+        "scores_match": true,
+        "scores": {
+          "memory_contract": 1.0,
+          "execution_status": "passed"
+        }
+      },
+      {
+        "dataset_item_id": "2cf7fdfd-8203-52d5-af13-769975923ed0",
+        "scores_match": true,
+        "scores": {
+          "execution_status": "passed",
+          "memory_contract": 1.0
+        }
+      },
+      {
+        "dataset_item_id": "00073661-de0a-5371-b54e-c32b56661af9",
+        "scores_match": true,
+        "scores": {
+          "execution_status": "passed",
+          "memory_contract": 1.0
+        }
+      },
+      {
+        "dataset_item_id": "9228ab60-cb2e-5b48-9e9c-523db47ea6a6",
+        "scores_match": true,
+        "scores": {
+          "memory_contract": 1.0,
+          "execution_status": "passed"
+        }
+      }
+    ],
+    "verified": true
+  }
+}

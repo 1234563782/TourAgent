@@ -1,0 +1,22 @@
+[
+  {"id":"meal_attribution","turns":[
+    {"question":"核对我的出差餐补。接待方免费安排了晚饭，早餐和午餐都是我自费，没有其他供餐。","expected":[{"intent":"policy_check","values":{"kind":"meal","covered_meals":["dinner"]},"absent":["amount","special_approval"]}]}
+  ]},
+  {"id":"approval_attribution","turns":[
+    {"question":"检查我的住宿费。我同事的特别审批已经通过，我自己的申请还在等待批准。","expected":[{"intent":"policy_check","values":{"kind":"hotel","special_approval":false},"absent":["amount"]}]}
+  ]},
+  {"id":"hypothetical_amount","turns":[
+    {"question":"酒店费如果一晚人民币八百元会超标吗？只是问这个假设，我还没入住，也没发生费用。","expected":[{"intent":"policy_check","values":{"kind":"hotel"},"absent":["amount","special_approval"]}]}
+  ]},
+  {"id":"independent_expenses","turns":[
+    {"question":"请依次核对两笔住宿：2026年10月12日在合肥实际花了人民币413元；2026年10月13日在福州实际花了人民币568元。","expected":[{"intent":"policy_check","values":{"kind":"hotel","destination":"合肥","expense_date":"2026-10-12","amount":"413","currency":"CNY"}},{"intent":"policy_check","values":{"kind":"hotel","destination":"福州","expense_date":"2026-10-13","amount":"568","currency":"CNY"}}]}
+  ]},
+  {"id":"correction_preserves_subject","turns":[
+    {"question":"核对2026年10月16日南昌住宿，实际支付人民币476元。","expected":[{"intent":"policy_check","values":{"kind":"hotel","destination":"南昌","expense_date":"2026-10-16","amount":"476","currency":"CNY"}}]},
+    {"question":"刚才那笔金额说错了，实际是人民币467元，其他情况没变，请重新核对。","expected":[{"intent":"policy_check","values":{"kind":"hotel","destination":"南昌","expense_date":"2026-10-16","amount":"467","currency":"CNY"}}]}
+  ]},
+  {"id":"explicit_retraction","turns":[
+    {"question":"核对我的住宿费，特别审批已经通过。","expected":[{"intent":"policy_check","values":{"kind":"hotel","special_approval":true}}]},
+    {"question":"撤回刚才关于特批通过的说法，我现在无法确认到底批没批，先按审批状态未知重新核对。","expected":[{"intent":"policy_check","values":{"kind":"hotel","special_approval":null}}]}
+  ]}
+]

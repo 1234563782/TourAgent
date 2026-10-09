@@ -1,0 +1,52 @@
+[
+  {
+    "id": "approval_rephrased",
+    "messages": [{"role": "human", "content": "帮我核对住宿费。专项审批已经获批了。"}],
+    "expected": [{"intent": "policy_check", "values": {"special_approval": true}}]
+  },
+  {
+    "id": "approval_pending",
+    "messages": [{"role": "human", "content": "核对酒店费，专项申请递交了，不过至今还没批下来。"}],
+    "expected": [{"intent": "policy_check", "values": {"special_approval": false}}]
+  },
+  {
+    "id": "meal_attribution",
+    "messages": [{"role": "human", "content": "帮忙算出差餐补：早饭与午饭都是我自己花钱吃的，主办方只管晚饭、不收费。"}],
+    "expected": [{"intent": "policy_check", "values": {"covered_meals": ["dinner"]}}]
+  },
+  {
+    "id": "compound_numeral",
+    "messages": [{"role": "human", "content": "这次连续驻场三十五天，帮我核对住宿制度。"}],
+    "expected": [{"intent": "policy_check", "values": {"long_assignment_days": 35}}]
+  },
+  {
+    "id": "unit_rephrased",
+    "messages": [{"role": "human", "content": "查一下住宿费用合不合规。我们支付的总价是每个房间每个晚上四百三十七元人民币，已经含税。"}],
+    "expected": [{"intent": "policy_check", "values": {"amount": "437", "basis": "room_night", "currency": "CNY", "taxes_confirmed": true}}]
+  },
+  {
+    "id": "short_followup",
+    "messages": [
+      {"role": "human", "content": "我想核对住宿费。"},
+      {"role": "ai", "content": "请问这笔住宿有专项审批吗？"},
+      {"role": "human", "content": "没有"}
+    ],
+    "expected": [{"intent": "policy_check", "values": {"special_approval": false}}]
+  },
+  {
+    "id": "two_expenses",
+    "messages": [{"role": "human", "content": "分别核对两笔住宿：2026-09-15天津实际支付317元人民币，2026-09-16苏州实际支付463元人民币。"}],
+    "expected": [
+      {"intent": "policy_check", "values": {"destination": "天津", "amount": "317", "expense_date": "2026-09-15"}},
+      {"intent": "policy_check", "values": {"destination": "苏州", "amount": "463", "expense_date": "2026-09-16"}}
+    ]
+  },
+  {
+    "id": "policy_and_weather",
+    "messages": [{"role": "human", "content": "先核对2026-09-15天津住宿实际支付的317元人民币，再查天津2026-09-15天气。"}],
+    "expected": [
+      {"intent": "policy_check", "values": {"destination": "天津", "amount": "317"}},
+      {"intent": "other", "values": {}}
+    ]
+  }
+]

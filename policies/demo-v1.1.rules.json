@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "currency": "CNY",
+  "city_categories": {
+    "A": ["北京", "上海", "广州", "深圳", "杭州", "南京", "苏州"],
+    "B": ["天津", "重庆", "石家庄", "太原", "呼和浩特", "沈阳", "长春", "哈尔滨", "合肥", "福州", "南昌", "济南", "郑州", "武汉", "长沙", "南宁", "海口", "成都", "贵阳", "昆明", "拉萨", "西安", "兰州", "西宁", "银川", "乌鲁木齐", "大连", "青岛", "宁波", "厦门"],
+    "C": []
+  },
+  "city_aliases": {
+    "北京市": "北京",
+    "上海市": "上海",
+    "广州市": "广州",
+    "深圳市": "深圳",
+    "杭州市": "杭州",
+    "南京市": "南京",
+    "苏州市": "苏州"
+  },
+  "other_city_category": "C",
+  "hotel_caps": {
+    "高管": {"A": "650", "B": "550", "C": "450"},
+    "经理主管": {"A": "500", "B": "420", "C": "330"},
+    "普通员工": {"A": "420", "B": "340", "C": "280"}
+  },
+  "shared_room_occupants": 2,
+  "shared_room_multiplier": "1.5",
+  "transport_classes": {
+    "高管": {
+      "flight": ["经济舱"],
+      "high_speed_train": ["一等座", "二等座"],
+      "regular_train": ["软卧", "硬卧", "硬座"]
+    },
+    "经理主管": {
+      "flight": ["经济舱"],
+      "high_speed_train": ["二等座"],
+      "regular_train": ["硬卧", "硬座"]
+    },
+    "普通员工": {
+      "flight": ["经济舱"],
+      "high_speed_train": ["二等座"],
+      "regular_train": ["硬卧", "硬座"]
+    }
+  },
+  "flight_approval_grades": ["普通员工"],
+  "railway_priority_hours": "6",
+  "meal_overnight_base": "100",
+  "meal_region_bases": {"普通地区": "100", "新疆": "120", "西藏": "120", "青海": "120"},
+  "meal_same_day_base": "50",
+  "meal_deductions": {"breakfast": "0.2", "lunch": "0.4", "dinner": "0.4"},
+  "local_transport_daily": "80",
+  "long_assignment_threshold": 30,
+  "source_clauses": {
+    "scope": ["1.1", "1.4", "8.1", "8.2", "10.1", "10.2", "10.3", "10.4"],
+    "hotel": ["4.1", "4.2", "4.3", "4.4", "4.5", "4.6", "4.7"],
+    "transport": ["3.1", "3.2", "3.3"],
+    "meal": ["5.1", "5.2", "5.3", "5.4", "5.5", "5.6"],
+    "local_transport": ["6.1", "6.2", "6.3", "6.4"]
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "scope": "selected_evidence_not_exhaustive",
+  "natural_language_candidates_unchanged": 80,
+  "engineering_scenarios": 41,
+  "engineering_environment_counts": {
+    "offline": 25,
+    "isolated_postgres": 16
+  },
+  "historical_recovery_batches": 3,
+  "historical_batch_outcomes": {
+    "passed": 2,
+    "failed": 1
+  },
+  "proposals_pending": 8,
+  "reviewed_gold": 0,
+  "matrix": [
+    {
+      "category": "concurrency_budget",
+      "engineering_scenarios": 11,
+      "proposed_dialogues": 0,
+      "current_real_model_evaluation": "not_run",
+      "coverage_claim": "selected_evidence_only_not_exhaustive"
+    },
+    {
+      "category": "memory_revision",
+      "engineering_scenarios": 9,
+      "proposed_dialogues": 3,
+      "current_real_model_evaluation": "not_run",
+      "coverage_claim": "selected_evidence_only_not_exhaustive"
+    },
+    {
+      "category": "policy_rag",
+      "engineering_scenarios": 10,
+      "proposed_dialogues": 4,
+      "current_real_model_evaluation": "not_run",
+      "coverage_claim": "selected_evidence_only_not_exhaustive"
+    },
+    {
+      "category": "recovery_idempotency",
+      "engineering_scenarios": 6,
+      "proposed_dialogues": 0,
+      "current_real_model_evaluation": "not_run",
+      "coverage_claim": "selected_evidence_only_not_exhaustive"
+    },
+    {
+      "category": "tool_state",
+      "engineering_scenarios": 5,
+      "proposed_dialogues": 1,
+      "current_real_model_evaluation": "not_run",
+      "coverage_claim": "selected_evidence_only_not_exhaustive"
+    }
+  ],
+  "unverified_dimensions": [
+    "真实模型多轮理解、重复运行稳定性和跨模型差异",
+    "人工标注相关条款后的真实检索Recall@K及排序质量",
+    "政策版本切换后的旧缓存、索引与引用一致性端到端验证",
+    "提示注入、伪造工具结果及敏感信息泄露的系统化对抗集",
+    "真实供应商429、网络中断、MCP故障与取消传播端到端验证",
+    "多Worker持续压力、延迟分位数、队列公平性及数据库故障切换",
+    "长会话压缩后事实保留与短期记忆容量边界",
+    "人工审核后的独立holdout、评审一致性和Langfuse实验关联"
+  ],
+  "limitations": [
+    "Static AST extraction only; tests, agents and databases were not executed.",
+    "Assertion locations are evidence, not independently reviewed gold contracts.",
+    "Full source files retain setup/import dependencies; no portable replay fixture is claimed.",
+    "Report sections are linked, not automatically classified as product badcases.",
+    "Duplicate groups cover exact conversations only, not semantic or prefix duplicates.",
+    "Other reports remain in the original inventory backlog."
+  ],
+  "validated_source_locators": 227
+}

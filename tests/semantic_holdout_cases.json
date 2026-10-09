@@ -1,0 +1,38 @@
+[
+  {
+    "id": "approved_outcome",
+    "messages": [{"role": "human", "content": "核对2026-09-21青岛住宿。领导给这笔费用的特别授权已经生效，并非还在申请。"}],
+    "expected": [{"intent": "policy_check", "values": {"special_approval": true, "destination": "青岛"}}]
+  },
+  {
+    "id": "unapproved_outcome",
+    "messages": [{"role": "human", "content": "帮我核对2026-09-21青岛住宿。我只递过特别授权申请，审批人还没同意。"}],
+    "expected": [{"intent": "policy_check", "values": {"special_approval": false, "destination": "青岛"}}]
+  },
+  {
+    "id": "unit_and_number",
+    "messages": [{"role": "human", "content": "核对2026-09-22厦门住宿：实际每间房住一夜的价款为人民币六百零九元，税另收，出差共二十一天。"}],
+    "expected": [{"intent": "policy_check", "values": {"amount": "609", "currency": "CNY", "basis": "room_night", "taxes_confirmed": false, "long_assignment_days": 21}}]
+  },
+  {
+    "id": "three_requests",
+    "messages": [{"role": "human", "content": "按顺序来：查2026-09-21青岛天气，核对当天青岛住宿实际支付的人民币389元，再核对2026-09-22厦门住宿实际支付的人民币527元。"}],
+    "expected": [
+      {"intent": "other", "values": {}},
+      {"intent": "policy_check", "values": {"destination": "青岛", "amount": "389", "expense_date": "2026-09-21"}},
+      {"intent": "policy_check", "values": {"destination": "厦门", "amount": "527", "expense_date": "2026-09-22"}}
+    ]
+  },
+  {
+    "id": "review_cut_negation",
+    "messages": [{"role": "human", "content": "核对我的酒店费，没有专项审批。"}],
+    "proposal": {"tasks": [{"intent": "policy_check", "question": "核对酒店费", "expense": {"kind": "hotel", "special_approval": true}, "evidence": {"special_approval": {"user_message": 0, "quote": "有专项审批"}}}]},
+    "expected_error": "semantic_review:"
+  },
+  {
+    "id": "review_wrong_meal",
+    "messages": [{"role": "human", "content": "核对餐补，单位只承担午饭费用，早晚饭我自己掏钱。"}],
+    "proposal": {"tasks": [{"intent": "policy_check", "question": "核对餐补", "expense": {"kind": "meal", "covered_meals": ["breakfast", "dinner"]}, "evidence": {"covered_meals": {"user_message": 0, "quote": "单位只承担午饭费用，早晚饭我自己掏钱"}}}]},
+    "expected_error": "semantic_review:"
+  }
+]

@@ -1,0 +1,22 @@
+[
+  {"id":"actual_and_assumed_price","turns":[
+    {"question":"核对这笔酒店费用，我已经付了人民币362元。再用同一笔费用假设为人民币519元，看看这两种金额各自是否超标。","expected":[{"intent":"policy_check","values":{"kind":"hotel","amount":"362","currency":"CNY"},"scenario":{"amount":"519"}}]}
+  ]},
+  {"id":"conditional_permission","turns":[
+    {"question":"核对我的机票政策，事实上乘机申请尚未获批。为了分析审批后的情况，这次先假定乘机许可已经批准，但不要当成实际审批结果。","expected":[{"intent":"policy_check","values":{"kind":"transport","flight_approval":false},"scenario":{"flight_approval":true}}]}
+  ]},
+  {"id":"future_trip_is_real_request","turns":[
+    {"question":"帮我安排一趟真实差旅，从长沙去郑州，2026年11月4日出发，11月6日返回。","expected":[{"intent":"plan_trip","values":{"origin":"长沙","destination":"郑州","departure_date":"2026-11-04","return_date":"2026-11-06"}}]}
+  ]},
+  {"id":"withdraw_and_correct","turns":[
+    {"question":"核对2026年11月5日珠海住宿，实际人民币628元，特别审批没有通过。","expected":[{"intent":"policy_check","values":{"kind":"hotel","destination":"珠海","expense_date":"2026-11-05","amount":"628","special_approval":false}}]},
+    {"question":"更正上面这笔：实际人民币582元；之前说特批没通过不准确，现在审批结果我不知道。地点日期不变。","expected":[{"intent":"policy_check","values":{"kind":"hotel","destination":"珠海","expense_date":"2026-11-05","amount":"582","special_approval":null},"same_subject":true}]}
+  ]},
+  {"id":"meal_owner_contrast","turns":[
+    {"question":"核对我的餐补。酒店给我免费提供早餐，我的午晚餐都自费；同事的三餐全免与我无关。","expected":[{"intent":"policy_check","values":{"kind":"meal","covered_meals":["breakfast"]},"absent":["amount","special_approval"]}]}
+  ]},
+  {"id":"trip_correction","turns":[
+    {"question":"规划2026年11月8日从昆明去无锡的差旅。","expected":[{"intent":"plan_trip","values":{"origin":"昆明","destination":"无锡","departure_date":"2026-11-08"}}]},
+    {"question":"上一趟只改目的地，改为常州，出发地和日期都不变。","expected":[{"intent":"plan_trip","values":{"origin":"昆明","destination":"常州","departure_date":"2026-11-08"},"same_subject":true}]}
+  ]}
+]

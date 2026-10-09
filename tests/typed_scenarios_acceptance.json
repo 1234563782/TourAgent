@@ -1,0 +1,17 @@
+[
+  {"id":"temporary_price_then_actual_correction","turns":[
+    {"question":"核对我2026年12月3日在苏州的住宿，实际支付人民币347元。","expected":[{"intent":"policy_check","values":{"kind":"hotel","amount":"347","currency":"CNY","destination":"苏州","expense_date":"2026-12-03"}}]},
+    {"question":"针对刚才这笔住宿，只假设房价变成人民币623元，其他条件沿用，实际支付金额没有改。","expected":[{"intent":"policy_check","values":{"kind":"hotel","amount":"347","destination":"苏州","expense_date":"2026-12-03"},"scenario":{"amount":"623","destination":"苏州"},"same_subject":true}]},
+    {"question":"现在更正实际付款：人民币329元，其他实际信息不变。","expected":[{"intent":"policy_check","values":{"kind":"hotel","amount":"329","destination":"苏州","expense_date":"2026-12-03"},"same_subject":true}]}
+  ]},
+  {"id":"pure_hypothesis_not_paid","turns":[
+    {"question":"我只是在研究住宿报销条件，没有住宿支出。假设每晚每间含税价为人民币721元，能报吗？","expected":[{"intent":"policy_check","values":{"kind":"hotel"},"absent":["amount","taxes_confirmed","basis"],"scenario":{"amount":"721","currency":"CNY","taxes_confirmed":true,"basis":"room_night"}}]}
+  ]},
+  {"id":"hypothetical_approval_then_unknown","turns":[
+    {"question":"检查我的机票政策，我的乘机申请明确没有获批；另请推演同一申请获批时的政策，审批实际仍未通过。","expected":[{"intent":"policy_check","values":{"kind":"transport","flight_approval":false},"scenario":{"flight_approval":true}}]},
+    {"question":"刚才关于我实际乘机申请未获批的说法撤回，我现在不知道审批结果，按未知状态核对。","expected":[{"intent":"policy_check","values":{"kind":"transport","flight_approval":null},"same_subject":true}]}
+  ]},
+  {"id":"meal_negation_and_attribution","turns":[
+    {"question":"算一下我的差旅餐补：我早饭晚饭自己付款，只有中饭由接待单位免费供应。同行的人三餐都是接待单位承担，不要算到我头上。","expected":[{"intent":"policy_check","values":{"kind":"meal","covered_meals":["lunch"]},"absent":["amount"]}]}
+  ]}
+]

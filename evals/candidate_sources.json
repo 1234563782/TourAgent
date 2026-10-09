@@ -1,0 +1,22 @@
+{
+  "fixtures": [
+    "tests/semantic_cases.json",
+    "tests/preference_dialogue_cases.json",
+    "tests/acceptance_cases.json",
+    "tests/acceptance_rules_cases.json",
+    "tests/slot_comparison_cases.json",
+    "tests/typed_scenarios_acceptance.json"
+  ],
+  "history_patterns": [
+    ".verification/acceptance-*/results.json",
+    ".verification/hotel-flow-browser-*/summary.json",
+    ".verification/failed-turn-browser-*/summary.json",
+    ".verification/task-controls-browser-*/summary.json",
+    ".verification/policy-rag-browser-*/summary.json",
+    ".verification/run-recovery-browser-*/summary.json"
+  ],
+  "review_pattern": "tests/acceptance_review_*.json",
+  "holdout_pattern": "tests/*holdout*.json",
+  "report_patterns": ["docs/*验收*.md"],
+  "rag_report": "docs/RAG收尾与部分回答验收_2026-09-18.md"
+}

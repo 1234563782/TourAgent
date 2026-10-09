@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "scope": "manifest_sources_only_not_exhaustive",
+  "extracted_records": 264,
+  "unique_candidates": 80,
+  "deduplicated_records": 184,
+  "user_turns_in_unique_candidates": 216,
+  "review_pending": 80,
+  "reviewed_gold": 0,
+  "inventory_status_counts": {
+    "extracted": 80,
+    "unsupported_or_empty": 4,
+    "annotations_only": 4,
+    "excluded_no_content_import": 3,
+    "inventory_only_requires_manual_extraction": 32
+  },
+  "historical_run_outcomes": {
+    "reported_failed_checks": 21,
+    "reported_checks_passed": 18,
+    "unknown": 177,
+    "reported_run_error_requires_triage": 4
+  },
+  "unmatched_review_refs": [],
+  "unmatched_history_patterns": [],
+  "errors": [],
+  "limitations": [
+    "No agent/model/database execution; no current accuracy measurement.",
+    "Historical expectations and answers are not current gold labels.",
+    "Whole conversations count as cases, not independent turns.",
+    "Setup, injected faults and policy versions need human review before replay.",
+    "Case-id review links do not establish exact run identity.",
+    "Unparsed reports and Python test bodies remain an extraction backlog.",
+    "Exact-input deduplication is not semantic deduplication."
+  ],
+  "validated_source_locators": 986
+}

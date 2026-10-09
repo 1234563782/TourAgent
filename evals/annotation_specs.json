@@ -1,0 +1,185 @@
+{
+  "shared_initial_state": {
+    "identity_isolation": "每例使用独立合成company/user/thread；不得读取真实账号或其他样例记忆。",
+    "clock": "固定2026-09-21T10:00:00+08:00；用户明确日期优先，未知日期不得取系统当天补齐。",
+    "providers": "禁用真实供应商和网络；不需要查询的样例使用拒绝调用桩。",
+    "fault_injection": "无；仅明确标为fault_injection的样例另行覆盖。"
+  },
+  "cases": [
+    {
+      "fixture_id": "explicit_add",
+      "category": "memory_revision",
+      "conversation_state": "新会话，无待确认操作。",
+      "memory_state": "本人长期偏好为空。",
+      "turns": [
+        {"must": ["保存本人长期飞机座位靠过道偏好", "记录来源为当前用户消息"], "must_not": ["保存为靠窗", "要求重复授权后才写入"], "observable": "preference_snapshot.items及source.quote；重建相同身份memory后读取，其他身份仍为空"}
+      ],
+      "basis": [["tests/test_preference_autosave.py", "test_plain_statement_is_saved_without_authorization"]],
+      "open_questions": ["真实模型对飞机座位偏好type/value的规范化表达需由语义断言识别，不要求固定中文标签。"]
+    },
+    {
+      "fixture_id": "other_person",
+      "category": "memory_revision",
+      "conversation_state": "新会话，无本人酒店偏好陈述。",
+      "memory_state": "本人长期偏好为空。",
+      "turns": [
+        {"must": ["保留同事为陈述主体", "本人长期偏好保持为空"], "must_not": ["将连锁酒店写成本人偏好"], "observable": "运行前后preference_snapshot.items为空；检查记忆工具context.subject"}
+      ],
+      "basis": [["tests/test_preference_autosave.py", "test_temporary_other_person_and_hypothetical_are_rejected"]],
+      "open_questions": []
+    },
+    {
+      "fixture_id": "temporary",
+      "category": "memory_revision",
+      "conversation_state": "新会话，无待处理行程；允许缺字段追问但不能丢弃临时范围。",
+      "memory_state": "本人长期偏好为空。",
+      "turns": [
+        {"must": ["将靠窗限定为本次高铁意愿", "长期偏好保持为空"], "must_not": ["因句中出现偏好而写入长期记忆"], "observable": "记忆快照和工具context.scope；如生成行程槽位，检查没有长期偏好变更"}
+      ],
+      "basis": [["tests/test_preference_autosave.py", "test_temporary_other_person_and_hypothetical_are_rejected"]],
+      "open_questions": []
+    },
+    {
+      "fixture_id": "hypothetical",
+      "category": "memory_revision",
+      "conversation_state": "新会话。",
+      "memory_state": "本人长期偏好为空。",
+      "turns": [
+        {"must": ["识别为假设且用户否认实际保存意图", "长期偏好保持为空"], "must_not": ["保存红眼航班偏好"], "observable": "preference_snapshot.items及记忆工具context.assertion"}
+      ],
+      "basis": [["tests/test_preference_autosave.py", "test_temporary_other_person_and_hypothetical_are_rejected"]],
+      "open_questions": []
+    },
+    {
+      "fixture_id": "candidate",
+      "category": "memory_revision",
+      "conversation_state": "新会话，无保存授权中断。",
+      "memory_state": "本人长期偏好为空。",
+      "turns": [
+        {"must": ["保存本人长期酒店隔音偏好", "引用当前陈述作为来源"], "must_not": ["额外询问是否允许保存", "只回复已记住却没有持久化记录"], "observable": "当前及重建memory后的items包含隔音语义；source.quote来自当前消息"}
+      ],
+      "basis": [["tests/test_preference_autosave.py", "test_plain_statement_is_saved_without_authorization"]],
+      "open_questions": ["现有工程测试使用火车偏好；隔音语义提取需真实模型单独验证。"]
+    },
+    {
+      "fixture_id": "explicit_update",
+      "category": "memory_revision",
+      "conversation_state": "新会话；向模型暴露当前偏好记录ID与revision。",
+      "memory_state": "从历史夹具seed初始化酒店=安静、座位=靠过道；保存初始化后的记录ID和revision。",
+      "turns": [
+        {"must": ["酒店偏好变更为带健身房", "座位记录及靠过道内容保持不变", "最终有两条偏好"], "must_not": ["追加第三条重复酒店偏好", "删除或改写座位偏好"], "observable": "按记录ID比较preference_snapshot前后items；检查mutation使用当前revision"}
+      ],
+      "basis": [["tests/test_preference_autosave.py", "test_version_conflict_does_not_overwrite_concurrent_change"]],
+      "open_questions": ["所引工程测试验证revision冲突拒绝，不直接证明定向更新语义；需执行原夹具验证。"]
+    },
+    {
+      "fixture_id": "explicit_delete",
+      "category": "memory_revision",
+      "conversation_state": "新会话；向模型暴露当前偏好记录ID与revision。",
+      "memory_state": "从历史夹具seed初始化酒店=安静、座位=靠过道；记录两项ID。",
+      "turns": [
+        {"must": ["仅删除酒店偏好", "座位偏好及记录ID保持不变", "最终仅剩一条座位偏好"], "must_not": ["清空全部偏好", "只回复删除而未持久化"], "observable": "当前与重建memory后的items；删除mutation所指ID"}
+      ],
+      "basis": [["tests/test_preference_autosave.py", "test_delete_is_reviewed_against_current_request"]],
+      "open_questions": ["现有工程测试删除单条transport记录；两记录选择性删除须执行该语言夹具。"]
+    },
+    {
+      "candidate_id": "gap-memory-scope",
+      "category": "memory_revision",
+      "conversation_state": "同一新会话连续三轮；每轮实际回复回传下一轮。",
+      "memory_state": "本人长期偏好为空。",
+      "turns": [
+        {"must": ["保存本人长期高铁靠窗偏好"], "must_not": ["写入靠过道偏好"], "observable": "首轮后memory.items含高铁靠窗语义"},
+        {"must": ["同事靠过道仅属于同事或本次上下文", "本人高铁靠窗记录保留"], "must_not": ["将本人靠窗改为靠过道"], "observable": "第二轮后本人偏好内容与ID；工具context.subject/scope"},
+        {"must": ["使用本人靠窗偏好，或缺出行字段时追问并保留该偏好"], "must_not": ["套用同事靠过道作为本人习惯"], "observable": "第三轮模型收到的记忆上下文、任务条件与memory快照"}
+      ],
+      "basis": [["tests/test_preference_autosave.py", "test_temporary_other_person_and_hypothetical_are_rejected"]],
+      "open_questions": ["第三轮记忆注入与偏好使用需要图执行器观测，不能只检查最终回复。"]
+    },
+    {
+      "candidate_id": "gap-memory-delete",
+      "category": "memory_revision",
+      "conversation_state": "同一新会话连续两轮；结束后重建memory并创建只读验证上下文。",
+      "memory_state": "本人长期偏好为空。",
+      "turns": [
+        {"must": ["持久化本人飞机靠窗偏好"], "must_not": ["只有口头确认而无记录"], "observable": "首轮memory快照及来源"},
+        {"must": ["删除首轮创建的座位偏好", "重建memory后也不存在该偏好"], "must_not": ["沿用已删除偏好注入新会话"], "observable": "第二轮快照、磁盘重读和新上下文；不要求删除原始聊天历史"}
+      ],
+      "basis": [["tests/test_preference_autosave.py", "test_delete_is_reviewed_against_current_request"]],
+      "open_questions": ["新会话上下文属于回放后的观测步骤，不冒充原对话第三轮。"]
+    },
+    {
+      "candidate_id": "gap-stale-result",
+      "category": "memory_revision",
+      "conversation_state": "新会话；原输入缺退房日期等信息，不能假设首轮必有有效结果。",
+      "memory_state": "无长期偏好、无旧任务。",
+      "turns": [
+        {"must": ["保存明确给出的南京和2026-10-01", "缺执行必需条件时追问"], "must_not": ["伪造退房日期和酒店结果"], "observable": "trip subject.values、任务状态及供应商调用"},
+        {"must": ["更正为苏州并保留已知日期", "已存在的南京任务或结果不得继续绑定为当前有效结果"], "must_not": ["把南京酒店结果仅换城市标签复用"], "observable": "subject_id/revision、task.result_ref与供应商结果目的地"},
+        {"must": ["拒绝把南京结果当作苏州当前结果", "若无可用结果明确说明"], "must_not": ["返回旧revision结果作为当前推荐"], "observable": "read_task_result输出、最终推荐来源及绑定版本"}
+      ],
+      "basis": [["tests/test_task_results.py", "test_rejects_stale_missing_unfinished_and_wrong_domain_results"]],
+      "open_questions": ["此原始对话可能只走追问，未必触发stale-result分支。覆盖该分支还需审核补充完整首轮条件或显式注入已完成酒店结果；不得据此宣称已测过。", "所引测试为费用事项；酒店图级版本失效需独立执行。"]
+    },
+    {
+      "candidate_id": "gap-ambiguous-target",
+      "category": "tool_state",
+      "conversation_state": "同一新会话两轮；第二轮前检查存在南京、苏州两个可修改事项且无唯一选中对象，否则标为前置条件不满足。",
+      "memory_state": "长期偏好为空。",
+      "turns": [
+        {"must": ["保留两趟出差分别去南京和苏州的意图", "缺字段可追问"], "must_not": ["无依据丢弃其中一个目的地"], "observable": "任务和subject清单；不强制在槽位不全时派发"},
+        {"must": ["目标确实歧义时追问要修改哪一趟", "歧义未解决前保持两个事项不变"], "must_not": ["默认修改最后一项", "追问同时提交某个事项的日期变更"], "observable": "第二轮前后subject/revision比较；槽位提取与提交事件"}
+      ],
+      "basis": [["tests/test_slot_protocol.py", "test_ambiguous_target_returns_question_without_extracting_or_committing"]],
+      "open_questions": ["真实第一轮回复可能形成唯一焦点；届时应标未触发目标条件，不直接判模型错误。"]
+    },
+    {
+      "candidate_id": "gap-season-missing-date",
+      "category": "policy_rag",
+      "policy_required": true,
+      "conversation_state": "当前事项已明确本人住宿档次为其他人员，省份山东；expense_date=null，固定高校政策资料包。",
+      "memory_state": "无其他身份或日期偏好。",
+      "turns": [
+        {"must": ["追问入住或费用日期", "若执行结构化查询，返回insufficient_information且missing_fields含expense_date"], "must_not": ["自动采用当天、7月1日或旺季", "把380或450作为已确定个人限额"], "observable": "lookup_lodging输入day=None、输出无cap；最终回答允许解释季节差异但不得当成已核准限额"}
+      ],
+      "basis": [["tests/test_university_policy.py", "test_unknown_stay_date_never_defaults_to_today_for_season"]],
+      "open_questions": []
+    },
+    {
+      "candidate_id": "gap-location-conflict",
+      "category": "policy_rag",
+      "policy_required": true,
+      "conversation_state": "档次其他人员，费用日期2026-10-01；无可覆盖用户省市的历史地点。",
+      "memory_state": "长期偏好为空。",
+      "turns": [
+        {"must": ["识别广东与南京冲突并澄清", "若执行结构化查询，不得得到status=ok"], "must_not": ["静默改成江苏", "套用广东其他地区标准", "直接给出确定限额"], "observable": "抽取的省市证据与结构化查询返回；最终追问指出需确认地点"}
+      ],
+      "basis": [["tests/test_university_policy.py", "test_unknown_or_ambiguous_location_is_not_other_area"]],
+      "open_questions": []
+    },
+    {
+      "candidate_id": "gap-shared-room",
+      "category": "policy_rag",
+      "policy_required": true,
+      "conversation_state": "新会话一般制度解释，无个人费用核验事项，不擅自补城市、金额或职级。",
+      "memory_state": "长期偏好为空。",
+      "turns": [
+        {"must": ["解释附表口径为元/人·天", "区分每人标准与房间总价，说明不能自动减半或据此自动核准"], "must_not": ["默认个人限额减半", "虚构个人实际费用并核验"], "observable": "回答结论与引用原文；如转费用核验需先确认个人金额，合住room_night不自动平摊"}
+      ],
+      "basis": [["tests/test_university_policy.py", "test_person_day_not_automatically_shared_room_division"]],
+      "open_questions": ["业务规则验证保守不平摊，不等于政策逐字规定所有合住情形；需人工复核引用和结论边界。"]
+    },
+    {
+      "candidate_id": "gap-review-rejection",
+      "category": "policy_rag",
+      "conversation_state": "固定合成政策检索响应；此例是受控故障实验，不是自然发生的生产失败。",
+      "memory_state": "无记忆依赖。",
+      "fault_injection": "沿用ReviewExhaustionTests：普通复核reject，最终证据复核supported=false；max_answer_attempts=1。写作模型和检索也使用确定性夹具。",
+      "turns": [
+        {"must": ["终止且rag.status=insufficient", "rag中无proposal", "检索1次、写作2次（只适用于该注入配置）"], "must_not": ["展示夹具中未通过支持性复核的610金额", "用户催促后跳过复核发布肯定结论", "无限重试"], "observable": "rag结构、render_policy文本、writer和search调用计数"}
+      ],
+      "basis": [["tests/test_policy_review_exhaustion.py", "test_final_rejection_is_bounded_and_never_publishes_unsafe_claim"]],
+      "open_questions": ["610为测试夹具值，不是高校政策限额；真实模型版本只共享安全契约，不能套用固定调用轨迹。"]
+    }
+  ]
+}

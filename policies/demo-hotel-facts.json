@@ -1,0 +1,15 @@
+{
+  "kind": "hotel",
+  "expense_date": "2026-09-09",
+  "destination": "上海",
+  "employee_grade": "普通员工",
+  "mainland_business_trip": true,
+  "long_assignment_days": 2,
+  "special_approval": false,
+  "amount": "400",
+  "currency": "CNY",
+  "basis": "room_night",
+  "taxes_confirmed": true,
+  "date_verified": true,
+  "occupants": 1
+}

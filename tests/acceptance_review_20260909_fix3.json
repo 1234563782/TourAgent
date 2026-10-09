@@ -1,0 +1,18 @@
+{
+  "hotel_numeric": {
+    "status": "未通过",
+    "reason": "第一轮证据错误嵌入facts，无有效规则结果；第二轮遗漏日期核实证据并重查旧400元事实，未得到500元超标80元的结论。"
+  },
+  "special_approval": {
+    "status": "未通过",
+    "reason": "没有调用政策工具，并追问用户已给出的日期；虽拒绝越权批准，但未完成特批规则核验。"
+  },
+  "planning": {
+    "status": "未通过",
+    "reason": "真实交通、酒店和部分地图查询成功，但plan_trip返回OpenAITimeoutError，draft为空，最终明确未取得有效草案。"
+  },
+  "shared_hotel": {
+    "status": "通过",
+    "reason": "合住口径修正后，实际规则返回630元限额，600元标准内；不代表审批或报销批准。"
+  }
+}

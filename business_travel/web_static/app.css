@@ -1,0 +1,100 @@
+:root { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; color: #252a28; background: #f8f9f9; letter-spacing: 0; }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; min-height: 100vh; display: flex; flex-direction: column; }
+button, input { font: inherit; }
+button, a, input { -webkit-tap-highlight-color: transparent; }
+button { cursor: pointer; border: 1px solid #ccd3d0; background: #fff; color: #343b37; border-radius: 5px; padding: 9px 16px; min-height: 42px; }
+button:hover { background: #f0f3f1; }
+button:disabled { cursor: wait; opacity: .6; }
+:focus-visible { outline: 3px solid #437ead; outline-offset: 3px; }
+.topbar { min-height: 76px; background: #fff; border-bottom: 1px solid #e0e5e2; display: flex; align-items: center; justify-content: space-between; padding: 16px 40px; gap: 20px; }
+.brand { display: flex; align-items: center; gap: 11px; text-decoration: none; color: #252a28; font-size: 22px; font-weight: 700; }
+.brand small { font-size: 13px; font-weight: 400; margin-left: 12px; color: #626c66; }
+.environment { font-size: 13px; color: #626c66; }
+main { flex: 1; width: 100%; }
+.boot { text-align: center; margin-top: 80px; color: #626c66; }
+.login { width: min(380px, calc(100% - 40px)); margin: 80px auto 100px; }
+.eyebrow { font-size: 11px; color: #176548; font-weight: 700; margin: 0 0 14px; }
+h1 { font-size: 28px; line-height: 1.4; margin: 0 0 32px; font-weight: 600; overflow-wrap: anywhere; }
+form > label { display: block; margin: 20px 0 8px; font-size: 14px; font-weight: 600; }
+form > input { width: 100%; height: 46px; border: 1px solid #bbc5bf; background: #fff; border-radius: 5px; padding: 10px 12px; }
+.check { display: flex; align-items: center; gap: 8px; font-weight: 400; font-size: 13px; margin: 14px 0 24px; color: #626c66; }
+.check input { width: 16px; height: 16px; accent-color: #176548; margin: 0; }
+.primary { background: #176548; color: #fff; border-color: #176548; width: 100%; min-height: 46px; font-weight: 600; }
+.primary:hover { background: #124f38; }
+.error { color: #a82c35; background: #fff1f1; border-left: 3px solid #ba3e47; padding: 12px; font-size: 14px; overflow-wrap: anywhere; }
+.workspace { width: min(1080px, calc(100% - 80px)); margin: 48px auto 72px; }
+.workspace-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.workspace-heading h1 { margin-bottom: 18px; }
+.account { display: flex; align-items: center; gap: 16px; font-size: 14px; min-width: 0; }
+#account-name { max-width: 220px; overflow-wrap: anywhere; }
+.account button { flex-shrink: 0; }
+.identity { display: flex; flex-wrap: wrap; gap: 24px 48px; border-top: 1px solid #e0e5e2; margin: 12px 0 36px; padding: 24px 0; }
+.identity div { min-width: 0; }
+.chat-panel { margin: 28px 0; border-top: 1px solid #e0e5e2; padding-top: 24px; }
+.conversation-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 20px; margin-top: 16px; }
+.conversation-sidebar { min-width: 0; border-right: 1px solid #d9dfdc; padding-right: 16px; }
+.conversation-main { min-width: 0; }
+#conversation-title { font-size: 16px; margin: 0 0 14px; overflow-wrap: anywhere; }
+#conversation-list { display: grid; gap: 4px; max-height: 440px; overflow: auto; margin: 12px 0; }
+#conversation-list button { text-align: left; border: 0; background: transparent; width: 100%; padding: 10px; overflow-wrap: anywhere; }
+#conversation-list button[aria-current="true"] { background: #e4eef6; color: #194e72; }
+#conversation-list time { display: block; font-size: 11px; color: #626c66; margin-top: 5px; }
+.chat-messages { min-height: 160px; max-height: 420px; overflow: auto; display: grid; gap: 12px; padding: 12px; background: #f6f8f7; }
+.chat-message { max-width: 78%; padding: 12px 14px; white-space: pre-wrap; line-height: 1.6; }
+.chat-message { min-width: 0; overflow-wrap: anywhere; }
+#chat-form { display: grid; grid-template-columns: minmax(0, 1fr) 76px; align-items: stretch; }
+#chat-submit { width: 76px; min-width: 0; }
+#chat-input { display: block; width: 100%; min-width: 0; min-height: 78px;
+  font: inherit; padding: 12px; border: 1px solid #bbc5bf; border-radius: 5px; }
+#chat-details { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 300px; overflow: auto; }
+#chat-status { min-height: 20px; font-size: 13px; color: #626c66; }
+.chat-message.user { justify-self: end; background: #dff1e8; }
+.chat-message.assistant { justify-self: start; background: #fff; border: 1px solid #d9dfdc; }
+.chat-message.assistant.chat-formatted { width: 100%; max-width: 100%; white-space: normal; font-size: 14px; }
+.chat-formatted h3 { font-size: 16px; line-height: 1.5; margin: 22px 0 10px; font-weight: 600; }
+.chat-formatted h3:first-child { margin-top: 0; font-size: 18px; }
+.chat-formatted p { white-space: pre-wrap; margin: 10px 0; }
+.chat-formatted > :last-child { margin-bottom: 0; }
+.chat-formatted details { border-top: 1px solid #e0e5e2; margin-top: 14px; padding-top: 10px; }
+.chat-formatted summary { cursor: pointer; color: #345f7a; padding: 5px 0; min-height: 32px; }
+.chat-formatted details p { color: #555f59; font-size: 13px; }
+.chat-table { max-width: 100%; overflow-x: auto; margin: 10px 0 14px; }
+.chat-table table { border-collapse: collapse; width: 100%; min-width: 550px; font-size: 13px; text-align: left; }
+.chat-table th, .chat-table td { padding: 10px 8px; border-bottom: 1px solid #e0e5e2; vertical-align: top; }
+.chat-table th { color: #53645c; font-weight: 500; background: #f6f8f7; }
+.chat-table td:first-child { white-space: nowrap; }
+#chat-form { gap: 12px; margin-top: 12px; }
+#chat-input { resize: vertical; }
+#chat-confirm { margin-top: 12px; }
+dt { font-size: 12px; color: #626c66; margin-bottom: 6px; }
+dd { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+.section-bar { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #ccd3d0; gap: 12px; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+dialog { width: min(480px, calc(100% - 32px)); max-height: calc(100dvh - 40px); overflow: auto; border: 1px solid #ccd3d0; border-radius: 6px; padding: 24px; }
+dialog::backdrop { background: #0005; }
+dialog h2 { margin: 0 0 20px; font-size: 20px; }
+dialog p { overflow-wrap: anywhere; }
+#recovery-dialog pre { font: 13px/1.7 "Segoe UI", "Microsoft YaHei", sans-serif; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; overflow: auto; }
+#recovery-dialog h3 { font-size: 14px; }
+#recovery-dialog .dialog-actions { flex-wrap: wrap; }
+#recovery-dialog .check input { flex-shrink: 0; }
+footer { padding: 24px 40px; border-top: 1px solid #e0e5e2; font-size: 12px; color: #626c66; display: flex; justify-content: space-between; gap: 16px; }
+@media (max-width: 600px) {
+  .conversation-layout { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .conversation-sidebar { border-right: 0; border-bottom: 1px solid #d9dfdc; padding: 0 0 12px; }
+  #conversation-list { max-height: 136px; }
+  .topbar { padding: 16px 20px; }
+  .brand small { display: block; margin: 2px 0 0; font-size: 11px; }
+  .brand { font-size: 19px; }
+  .environment { font-size: 11px; }
+  .login { margin-top: 52px; margin-bottom: 64px; }
+  .workspace { width: calc(100% - 40px); margin-top: 32px; }
+  .workspace-heading { align-items: flex-start; flex-direction: column; gap: 0; }
+  .account { width: 100%; justify-content: space-between; margin-bottom: 14px; }
+  .identity { flex-direction: column; gap: 18px; margin-bottom: 20px; }
+  #chat-form { grid-template-columns: minmax(0, 1fr) 68px; }
+  #chat-submit { width: 68px; padding-left: 8px; padding-right: 8px; }
+  footer { padding: 20px; }
+}

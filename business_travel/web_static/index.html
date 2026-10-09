@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Aligo · 高校差旅</title>
+  <link rel="icon" href="/static/brand.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/chat-stream.js" defer></script>
+  <script src="/static/message-view.js" defer></script>
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Aligo 首页">
+      <img src="/static/brand.svg" width="32" height="32" alt="">
+      <span>Aligo <small>高校差旅</small></span>
+    </a>
+    <span class="environment">个人工作台</span>
+  </header>
+  <main>
+    <p id="boot" class="boot" role="status">正在加载…</p>
+    <section id="login-view" class="login" hidden aria-labelledby="login-title">
+      <p class="eyebrow">ALIGO / WORKSPACE</p>
+      <h1 id="login-title">登录工作台</h1>
+      <form id="login-form">
+        <label for="username">账号</label>
+        <input id="username" name="username" autocomplete="username" required
+               minlength="3" maxlength="64" pattern="[A-Za-z0-9_-]{3,64}"
+               autocapitalize="none" spellcheck="false">
+        <label for="password">密码</label>
+        <input id="password" name="password" type="password" autocomplete="current-password"
+               required maxlength="128">
+        <label class="check"><input id="show-password" type="checkbox">显示密码</label>
+        <p id="login-error" class="error" role="alert" hidden></p>
+        <button id="login-submit" type="submit" class="primary">登录</button>
+      </form>
+    </section>
+    <section id="workspace" class="workspace" hidden aria-labelledby="workspace-title">
+      <div class="workspace-heading">
+        <div><p class="eyebrow">MY WORKSPACE</p><h1 id="workspace-title">我的差旅</h1></div>
+        <div class="account"><span id="account-name"></span><button id="logout" type="button">退出登录</button></div>
+      </div>
+      <dl class="identity">
+        <div><dt>组织</dt><dd id="company"></dd></div>
+        <div><dt>用户 ID</dt><dd id="user-id"></dd></div>
+      </dl>
+      <section class="chat-panel" aria-labelledby="chat-title">
+        <div class="section-bar"><h2 id="chat-title">差旅助手</h2><button id="chat-reload" type="button">刷新会话</button></div>
+        <div class="conversation-layout">
+        <aside class="conversation-sidebar" aria-label="历史对话">
+          <button id="chat-new" type="button">新对话</button>
+          <nav id="conversation-list" aria-label="选择对话"></nav>
+          <button id="conversations-more" type="button" hidden>更多对话</button>
+        </aside>
+        <div class="conversation-main">
+        <h3 id="conversation-title">对话</h3>
+        <div id="chat-messages" class="chat-messages" aria-live="polite"></div>
+        <p id="chat-status" role="status"></p>
+        <p id="chat-error" class="error" role="alert" hidden></p>
+        <button id="chat-recover" type="button" hidden>核实并恢复</button>
+        <form id="chat-form">
+          <textarea id="chat-input" rows="3" maxlength="3000" aria-label="消息" placeholder="输入消息" required></textarea>
+          <button id="chat-submit" class="primary" type="submit">发送</button>
+        </form>
+        <div id="chat-confirm" hidden>
+          <p>助手需要你的确认才能继续。</p>
+          <pre id="chat-details"></pre>
+          <button id="chat-yes" type="button">确认</button>
+          <button id="chat-no" type="button">取消</button>
+        </div>
+        </div>
+        </div>
+      </section>
+    </section>
+  </main>
+  <dialog id="recovery-dialog" aria-labelledby="recovery-title">
+    <h2 id="recovery-title">核实失败执行</h2>
+    <p id="recovery-notice"></p>
+    <p id="recovery-source"></p>
+    <h3>当前长期偏好</h3>
+    <pre id="recovery-preferences"></pre>
+    <h3>请求开始后保存的行程草案</h3>
+    <pre id="recovery-trips"></pre>
+    <label class="check"><input id="recovery-reviewed" type="checkbox">我已核实以上记录</label>
+    <p id="recovery-error" class="error" role="alert" hidden></p>
+    <div class="dialog-actions">
+      <button id="recovery-cancel" type="button">取消</button>
+      <button id="recovery-submit" type="button" disabled>确认并建立恢复对话</button>
+    </div>
+  </dialog>
+  <footer>Aligo <span>高校差旅工作台</span></footer>
+</body>
+</html>

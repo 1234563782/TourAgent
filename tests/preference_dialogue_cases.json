@@ -1,0 +1,46 @@
+[
+  {
+    "id": "explicit_add",
+    "memory_expectation": {"count": 1, "records": [{"value_contains": "过道"}]},
+    "question": "以后出差坐飞机，请把我的座位偏好记成靠过道。",
+    "expected": "不二次确认，保存本人长期靠过道偏好。"
+  },
+  {
+    "id": "other_person",
+    "memory_expectation": {"count": 0},
+    "question": "同事说他出门总选连锁酒店，我替他问一下这样好吗？",
+    "expected": "不能写成本人的偏好。"
+  },
+  {
+    "id": "temporary",
+    "memory_expectation": {"count": 0},
+    "question": "这次高铁想坐靠窗，但别当成我以后的习惯。",
+    "expected": "不写长期偏好；不应因缺少日期而丢失用户明确的范围。"
+  },
+  {
+    "id": "hypothetical",
+    "memory_expectation": {"count": 0},
+    "question": "假设我让你记住喜欢红眼航班，你会怎么处理？我没有要你真的保存。",
+    "expected": "解释假设，不写长期偏好。"
+  },
+  {
+    "id": "candidate",
+    "memory_expectation": {"count": 1, "records": [{"value_contains": "隔音"}]},
+    "question": "我平时住酒店比较在意隔音。",
+    "expected": "自动保存本人长期隔音偏好，不询问保存授权。"
+  },
+  {
+    "id": "explicit_update",
+    "memory_expectation": {"count": 2, "records": [{"type": "酒店", "value_contains": "健身房"}, {"type": "座位", "value_contains": "过道"}]},
+    "seed": [{"type": "酒店", "value": "安静"}, {"type": "座位", "value": "靠过道"}],
+    "question": "请把我保存的酒店偏好改成带健身房，其他的保留。",
+    "expected": "酒店改为带健身房，座位不变；明确授权不二次确认。"
+  },
+  {
+    "id": "explicit_delete",
+    "memory_expectation": {"count": 1, "records": [{"type": "座位", "value_contains": "过道"}]},
+    "seed": [{"type": "酒店", "value": "安静"}, {"type": "座位", "value": "靠过道"}],
+    "question": "请忘掉我的酒店偏好，座位偏好不要改。",
+    "expected": "仅删除酒店，座位不变；明确授权不二次确认。"
+  }
+]

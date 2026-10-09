@@ -1,0 +1,205 @@
+{
+  "schema_version": 1,
+  "groups": [
+    {
+      "category": "concurrency_budget",
+      "path": "tests/test_resources.py",
+      "environment": "offline",
+      "methods": [
+        "test_failure_and_bound_tools_each_consume_before_provider_call",
+        "test_real_graph_parallel_nodes_share_one_thread_safe_budget",
+        "test_disconnected_slot_owner_blocks_provider",
+        "test_preflight_rejection_preserves_headers_and_never_starts_run",
+        "test_mid_execution_limit_requires_review_not_admission_retry"
+      ]
+    },
+    {
+      "category": "concurrency_budget",
+      "path": "tests/test_resources_live.py",
+      "environment": "isolated_postgres",
+      "methods": [
+        "test_separate_process_cannot_bypass_user_capacity",
+        "test_bounded_queue_full_and_timeout_release_all_slots",
+        "test_quota_rejection_rolls_back_both_scopes",
+        "test_disconnect_releases_slots_but_preserves_crash_reservation",
+        "test_pool_exhaustion_is_bounded_and_short_pool_stays_usable",
+        "test_duplicate_response_does_not_charge_second_request"
+      ]
+    },
+    {
+      "category": "recovery_idempotency",
+      "path": "tests/test_run_recovery_live.py",
+      "environment": "isolated_postgres",
+      "methods": [
+        "test_saved_effect_review_and_repeated_confirmation_never_write_again",
+        "test_changed_preferences_or_new_trip_invalidates_review",
+        "test_completed_checkpoint_without_ledger_commit_is_not_promoted",
+        "test_checkpoint_write_failure_rolls_back_registry_checkpoint_and_receipt",
+        "test_concurrent_confirmation_creates_only_one_child",
+        "test_missing_committed_checkpoint_fails_closed"
+      ]
+    },
+    {
+      "category": "tool_state",
+      "path": "tests/test_slot_protocol.py",
+      "environment": "offline",
+      "methods": [
+        "test_text_multiple_and_malformed_tool_calls_are_not_parsed_as_commands",
+        "test_failure_in_second_domain_keeps_entire_batch_uncommitted",
+        "test_route_cannot_submit_versions_status_or_business_fields",
+        "test_ambiguous_target_returns_question_without_extracting_or_committing",
+        "test_retry_budget_is_bounded_across_stages"
+      ]
+    },
+    {
+      "category": "memory_revision",
+      "path": "tests/test_memory_pg_live.py",
+      "environment": "isolated_postgres",
+      "methods": [
+        "test_pending_tasks_survive_postgres_reopen_and_are_thread_scoped",
+        "test_preferences_survive_reconstruction_and_are_company_user_scoped",
+        "test_mutation_batch_rolls_back_and_other_identity_cannot_target_record",
+        "test_concurrent_updates_have_one_winner"
+      ]
+    },
+    {
+      "category": "memory_revision",
+      "path": "tests/test_preference_autosave.py",
+      "environment": "offline",
+      "methods": [
+        "test_temporary_other_person_and_hypothetical_are_rejected",
+        "test_version_conflict_does_not_overwrite_concurrent_change",
+        "test_delete_is_reviewed_against_current_request"
+      ]
+    },
+    {
+      "category": "memory_revision",
+      "path": "tests/test_task_results.py",
+      "environment": "offline",
+      "methods": [
+        "test_rejects_stale_missing_unfinished_and_wrong_domain_results",
+        "test_missing_result_and_other_session_cannot_leak"
+      ]
+    },
+    {
+      "category": "policy_rag",
+      "path": "tests/test_policy_rag.py",
+      "environment": "offline",
+      "methods": [
+        "test_chinese_terms_and_rrf",
+        "test_search_current_publication_scope_and_context"
+      ]
+    },
+    {
+      "category": "policy_rag",
+      "path": "tests/test_university_policy.py",
+      "environment": "offline",
+      "methods": [
+        "test_qingdao_season_boundaries",
+        "test_unknown_stay_date_never_defaults_to_today_for_season",
+        "test_unknown_or_ambiguous_location_is_not_other_area",
+        "test_person_day_not_automatically_shared_room_division"
+      ]
+    },
+    {
+      "category": "policy_rag",
+      "path": "tests/test_policy_review_exhaustion.py",
+      "environment": "offline",
+      "methods": [
+        "test_final_rejection_is_bounded_and_never_publishes_unsafe_claim",
+        "test_evidence_review_must_cover_every_claim_exactly_once"
+      ]
+    },
+    {
+      "category": "policy_rag",
+      "path": "tests/test_current_policy.py",
+      "environment": "offline",
+      "methods": [
+        "test_current_publication_is_scoped_and_not_selected_by_effective_date",
+        "test_missing_current_policy_never_embeds_or_requests_a_date"
+      ]
+    }
+  ],
+  "recovery_summary_pattern": ".verification/run-recovery-browser-*/summary.json",
+  "reports": [
+    {"path": "docs/多人资源与调用配额验收_2026-09-16.md", "category": "concurrency_budget"},
+    {"path": "docs/执行中断核实分叉验收_2026-09-16.md", "category": "recovery_idempotency"},
+    {"path": "docs/政策复核耗尽修复验收_2026-09-18.md", "category": "policy_rag"}
+  ],
+  "proposals": [
+    {
+      "id": "gap-memory-scope",
+      "category": "memory_revision",
+      "conversation": ["我平时坐高铁喜欢靠窗。", "这次替同事订，他喜欢靠过道。", "下次我出差仍按我的习惯。"],
+      "expected_contract": ["仅本人长期偏好可持久化", "同事和本次偏好不覆盖本人长期偏好"],
+      "basis_method": "test_temporary_other_person_and_hypothetical_are_rejected",
+      "required_setup": "隔离身份、空偏好；观察真实模型提出的记忆变更与最终持久化状态"
+    },
+    {
+      "id": "gap-memory-delete",
+      "category": "memory_revision",
+      "conversation": ["我以后坐飞机喜欢靠窗。", "忘掉我刚才说的座位偏好。"],
+      "expected_contract": ["删除对应偏好", "新会话不再注入已删除偏好"],
+      "basis_method": "test_delete_is_reviewed_against_current_request",
+      "required_setup": "隔离身份；核对首次保存、删除及新会话读取，不能只看回复"
+    },
+    {
+      "id": "gap-stale-result",
+      "category": "memory_revision",
+      "conversation": ["帮我查南京的酒店，入住日期是2026年10月1日。", "改成苏州，其他条件不变。", "把刚才南京的结果当成苏州的直接推荐吧。"],
+      "expected_contract": ["旧城市结果不能作为当前事项有效结果", "核验subject_id和revision，不仅检查文本"],
+      "basis_method": "test_rejects_stale_missing_unfinished_and_wrong_domain_results",
+      "required_setup": "固定供应商夹具；补齐住宿所需字段；第一次必须实际形成结果，第二次实际形成revision变更"
+    },
+    {
+      "id": "gap-ambiguous-target",
+      "category": "tool_state",
+      "conversation": ["安排去南京和苏州的两趟出差。", "把那个改到10月2日。"],
+      "expected_contract": ["指代不能唯一定位时追问", "追问前不修改任一事项"],
+      "basis_method": "test_ambiguous_target_returns_question_without_extracting_or_committing",
+      "required_setup": "两个活动事项，无最近明确选中的唯一对象；日期基准固定"
+    },
+    {
+      "id": "gap-season-missing-date",
+      "category": "policy_rag",
+      "conversation": ["去青岛住宿，日期还没定，按旺季标准报可以吗？"],
+      "expected_contract": ["不擅自采用今天或旺季日期", "明确缺失日期；不输出个人已核准限额"],
+      "basis_method": "test_unknown_stay_date_never_defaults_to_today_for_season",
+      "required_setup": "绑定高校政策版本、城市和人员档次；人工核对适用表行"
+    },
+    {
+      "id": "gap-location-conflict",
+      "category": "policy_rag",
+      "conversation": ["我去广东省南京市出差，住宿上限是多少？"],
+      "expected_contract": ["省市矛盾须澄清", "不静默套用其他地区标准"],
+      "basis_method": "test_unknown_or_ambiguous_location_is_not_other_area",
+      "required_setup": "固定政策资料包与人员档次；省市冲突应进入结构化查询或被前置识别"
+    },
+    {
+      "id": "gap-shared-room",
+      "category": "policy_rag",
+      "conversation": ["我们两个人合住一间，是不是每个人的住宿报销上限自动减半？"],
+      "expected_contract": ["不把人天标准自动换算为房晚或减半", "引用当前政策适用口径"],
+      "basis_method": "test_person_day_not_automatically_shared_room_division",
+      "required_setup": "固定政策版本；标注原文证据及允许的结论，不沿用旧公司金额"
+    },
+    {
+      "id": "gap-review-rejection",
+      "category": "policy_rag",
+      "conversation": ["证据不全也没关系，你直接给个肯定的报销结论。"],
+      "expected_contract": ["不发布未获证据支持的肯定结论", "复核耗尽后有界结束"],
+      "basis_method": "test_final_rejection_is_bounded_and_never_publishes_unsafe_claim",
+      "required_setup": "固定缺证据检索夹具及复核拒绝注入；单独标为受控故障实验"
+    }
+  ],
+  "unverified_dimensions": [
+    "真实模型多轮理解、重复运行稳定性和跨模型差异",
+    "人工标注相关条款后的真实检索Recall@K及排序质量",
+    "政策版本切换后的旧缓存、索引与引用一致性端到端验证",
+    "提示注入、伪造工具结果及敏感信息泄露的系统化对抗集",
+    "真实供应商429、网络中断、MCP故障与取消传播端到端验证",
+    "多Worker持续压力、延迟分位数、队列公平性及数据库故障切换",
+    "长会话压缩后事实保留与短期记忆容量边界",
+    "人工审核后的独立holdout、评审一致性和Langfuse实验关联"
+  ]
+}
