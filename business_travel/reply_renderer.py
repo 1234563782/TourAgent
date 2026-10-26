@@ -13,8 +13,6 @@ from .weather import render_weather
 RENDERABLE_TOOL_NAMES = frozenset({
     "consult_policy",
     "plan_trip",
-    "save_preferences",
-    "edit_preferences",
     "save_trip",
     "confirm_facts",
     "query_weather",
@@ -32,16 +30,6 @@ TRIP_FIELD_LABELS = {
     "journey": "单程或往返",
     "trip_dates": "行程日期先后关系及完整的入住、退房日期",
 }
-
-PREFERENCE_STATUS_TEXT = {
-    "saved": "已记住你的偏好。",
-    "cancelled": "已取消保存偏好，本次未写入。",
-    "conflict": "偏好已变化或存在冲突，本次未写入。请查看当前记录后重新确认。",
-    "rejected": "本次内容不适合保存为你的长期偏好，未写入。",
-    "needs_clarification": "还不能确定这是否是你本人的长期偏好，本次未保存。请说明是长期习惯还是仅限这次行程。",
-    "review_unavailable": "偏好信息核对暂时失败，本次未保存，请稍后重试。",
-}
-
 
 def _parse_tool_data(message):
     try:
@@ -72,13 +60,6 @@ def _render_trip(data):
     return render_draft(data.get("draft"))
 
 
-def _render_preference(data):
-    return PREFERENCE_STATUS_TEXT.get(
-        data.get("status"),
-        "偏好未保存，请检查输入或服务状态。",
-    )
-
-
 def render_tool_result(name, data):
     """Render one validated tool result without invoking a language model."""
     if not isinstance(data, dict):
@@ -89,8 +70,6 @@ def render_tool_result(name, data):
         "query_weather": render_weather,
         "consult_policy": render_policy,
         "plan_trip": _render_trip,
-        "save_preferences": _render_preference,
-        "edit_preferences": _render_preference,
         "save_trip": lambda payload: {
             "saved": "行程草案已保存；不涉及预订或审批。",
             "cancelled": "已取消保存行程草案，本次未写入。",

@@ -23,7 +23,6 @@ from .providers import InformationProvider, FlyAIProvider
 from .tuniu import TuniuProvider
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.types import Command
-from .preferences import PreferenceConflict, PreferenceMutation
 from .settings import Settings
 from .observability import Telemetry
 from .conversations import ConversationStore
@@ -259,11 +258,6 @@ def create_app(settings=None, auth_config=None, store=None):
         identity = MemoryIdentity(user["company_id"], user["user_id"])
         return PostgresTravelMemory(settings, identity).read()
 
-    def personal_memory(request: Request, user=Depends(current_user)):
-        if request.query_params:
-            raise HTTPException(400, "此接口不接受身份或查询参数")
-        return PostgresTravelMemory(settings, MemoryIdentity(user["company_id"], user["user_id"]))
-
     def conversation_store(user):
         return ConversationStore(settings, MemoryIdentity(user["company_id"], user["user_id"]))
 
@@ -292,7 +286,8 @@ def create_app(settings=None, auth_config=None, store=None):
         return build_assistant(lambda role: create_model(settings), settings,
                                PostgresTravelMemory(settings, identity), PolicyStore.from_settings(settings),
                                checkpointer=checkpointer, provider=provider,
-                               information=InformationProvider(settings))
+                               information=InformationProvider(settings),
+                               personnel_profile=store.get_personnel(identity.user_id))
 
     def recovery_action(request, user, conversation_id, body=None):
         if request.query_params:
@@ -495,19 +490,6 @@ def create_app(settings=None, auth_config=None, store=None):
     def conversation_stream(conversation_id: str, body: ChatBody, request: Request,
                             user=Depends(current_user)):
         return ChatEventResponse(lambda emit: run_chat(request, user, body, conversation_id, emit))
-
-    @app.get("/api/preferences")
-    def preferences(memory=Depends(personal_memory)):
-        return memory.preference_snapshot()
-
-    @app.patch("/api/preferences")
-    def change_preferences(body: PreferenceMutation, memory=Depends(personal_memory)):
-        try:
-            return memory.mutate_preferences(body, {"kind": "user_interface", "consent": "explicit_request"})
-        except PreferenceConflict:
-            raise HTTPException(409, "偏好已变化或存在冲突，请刷新后重新确认") from None
-        except ValueError:
-            raise HTTPException(422, "偏好操作不合法，请检查内容和记录 ID") from None
 
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
     return app

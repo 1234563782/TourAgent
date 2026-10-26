@@ -32,7 +32,7 @@ class BusinessGuardTests(unittest.TestCase):
 
     def test_cancelled_save_cannot_be_rewritten_as_saved(self):
         messages = [HumanMessage(content="保存"),
-                    ToolMessage(name="save_preferences", tool_call_id="save", content='{"status":"cancelled"}')]
+                    ToolMessage(name="save_trip", tool_call_id="save", content='{"status":"cancelled"}')]
         response = finalize_business_reply(messages, AIMessage(content="已经永久保存"))
         self.assertIn("未写入", response.content)
         self.assertNotIn("永久保存", response.content)
@@ -40,10 +40,10 @@ class BusinessGuardTests(unittest.TestCase):
     def test_policy_and_save_results_are_both_preserved(self):
         messages = [HumanMessage(content="核对并保存"),
                     ToolMessage(name="consult_policy", tool_call_id="policy", content='{"rule_checks":[]}'),
-                    ToolMessage(name="save_preferences", tool_call_id="save", content='{"status":"saved"}')]
+                    ToolMessage(name="save_trip", tool_call_id="save", content='{"status":"saved"}')]
         response = finalize_business_reply(messages, AIMessage(content="合规"))
         self.assertIn("信息不足", response.content)
-        self.assertIn("已记住", response.content)
+        self.assertIn("行程草案已保存", response.content)
 
     def test_retest_report_keeps_original_answer_and_failed_review(self):
         from scripts.render_business_retest import render

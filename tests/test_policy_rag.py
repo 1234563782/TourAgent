@@ -58,7 +58,7 @@ def chunk_row(key, related=()):
             "table_data": None, "related_ids": list(related)}
 
 
-def store_with_db(rows):
+def store_with_db(rows, *, hnsw_available=True):
     connection = MagicMock()
     connection.__enter__.return_value = connection
     answers = iter(rows)
@@ -66,6 +66,9 @@ def store_with_db(rows):
     def execute(sql, params=None):
         cursor = Mock()
         if sql.startswith("SELECT set_config") or sql.startswith("SELECT pg_advisory"):
+            return cursor
+        if sql.startswith("SELECT to_regclass"):
+            cursor.fetchone.return_value = {"available": hnsw_available}
             return cursor
         data = next(answers)
         cursor.fetchone.return_value = data
@@ -328,6 +331,25 @@ class EmbeddingTests(unittest.TestCase):
             with self.assertRaises(PolicyError) as error:
                 EmbeddingClient(settings(), transport=transport).embed(["one"])
             self.assertNotIn("test-secret", str(error.exception))
+            self.assertIn(str(status), str(error.exception))
+
+    def test_supported_compatible_dimension_model_gets_dimensions(self):
+        def handler(request):
+            body = json.loads(request.content)
+            self.assertEqual(body["model"], "text-embedding-v4")
+            self.assertEqual(body["dimensions"], 3)
+            return httpx.Response(200, json={"data": [{"index": 0, "embedding": [1, 0, 0]}]})
+        client = EmbeddingClient(settings(embedding_model="text-embedding-v4"),
+                                 transport=httpx.MockTransport(handler))
+        self.assertEqual(client.embed(["one"]), [[1., 0., 0.]])
+
+    def test_rejected_response_preserves_safe_provider_code(self):
+        transport = httpx.MockTransport(lambda request: httpx.Response(
+            400, json={"error": {"code": "invalid_parameter", "message": "secret"}}))
+        with self.assertRaises(PolicyError) as error:
+            EmbeddingClient(settings(), transport=transport).embed(["one"])
+        self.assertEqual(str(error.exception), "embedding_request_rejected_http_400_invalid_parameter")
+        self.assertNotIn("secret", str(error.exception))
 
     def test_duplicate_indices_rejected(self):
         transport = httpx.MockTransport(lambda request: httpx.Response(200, json={"data": [
@@ -437,6 +459,66 @@ class RepositoryTests(unittest.TestCase):
             if "policy_chunks" in call.args[0]:
                 self.assertIn("document_id=%s", call.args[0])
         self.assertFalse(result["context_incomplete"])
+
+    def test_search_reports_hnsw_vector_mode(self):
+        store, _, _ = store_with_db([
+            [database_doc(status="published")], [{"chunk_id": "one"}], [{"chunk_id": "one"}],
+            [chunk_row("one")],
+        ])
+        result = store.search("住宿", _include_rankings=True)
+        self.assertEqual(result["rankings"]["vector_search_mode"], "hnsw")
+
+    def test_embedding_failure_degrades_to_keyword_retrieval(self):
+        store, _, _ = store_with_db([
+            [database_doc(status="published")], [{"chunk_id": "one"}], [chunk_row("one")],
+        ])
+        store.embedder.embed.side_effect = PolicyError(
+            "embedding_request_rejected_http_400_AllocationQuota.FreeTierOnly")
+
+        result = store.search("住宿", _include_rankings=True)
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["degraded"])
+        self.assertEqual(result["vector_error_code"],
+                         "embedding_request_rejected_http_400_AllocationQuota.FreeTierOnly")
+        self.assertEqual([source["chunk"] for source in result["sources"]], ["one"])
+        self.assertEqual(result["rankings"]["vector_ids"], [])
+        self.assertEqual(result["rankings"]["keyword_ids"], ["one"])
+        self.assertEqual(result["rankings"]["vector_search_mode"], "embedding_unavailable")
+
+    def test_unexpected_embedding_failure_is_redacted_and_degrades(self):
+        store, _, _ = store_with_db([
+            [database_doc(status="published")], [{"chunk_id": "one"}], [chunk_row("one")],
+        ])
+        store.embedder.embed.side_effect = RuntimeError("private-provider-secret")
+
+        result = store.search("住宿", _include_rankings=True)
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["degraded"])
+        self.assertEqual(result["vector_error_code"], "embedding_request_failed_check_configuration")
+        self.assertNotIn("private-provider-secret", json.dumps(result, ensure_ascii=False))
+
+    def test_policy_error_message_is_redacted_before_degradation_metadata(self):
+        store, _, _ = store_with_db([
+            [database_doc(status="published")], [{"chunk_id": "one"}], [chunk_row("one")],
+        ])
+        store.embedder.embed.side_effect = PolicyError("private-provider-secret")
+
+        result = store.search("住宿", _include_rankings=True)
+
+        self.assertEqual(result["vector_error_code"], "embedding_request_failed_check_configuration")
+        self.assertNotIn("private-provider-secret", json.dumps(result, ensure_ascii=False))
+
+    def test_search_falls_back_to_exact_when_hnsw_index_is_missing(self):
+        store, conn, _ = store_with_db([
+            [database_doc(status="published")], [{"chunk_id": "one"}], [{"chunk_id": "one"}],
+            [chunk_row("one")],
+        ], hnsw_available=False)
+        result = store.search("住宿", _include_rankings=True)
+        self.assertEqual(result["rankings"]["vector_search_mode"], "exact_fallback")
+        vector_query = next(c for c in conn.execute.call_args_list if "ORDER BY embedding::vector" in c.args[0])
+        self.assertIn("MATERIALIZED", vector_query.args[0])
 
     def test_search_adds_reviewed_scope_without_related_links(self):
         boundary = {**chunk_row("boundary"), "clause": "scope.example"}

@@ -126,9 +126,10 @@ class AuthUnitTests(unittest.TestCase):
     def test_memory_only_uses_verified_identity(self):
         self.store.current_user.return_value = {"company_id": "company", "user_id": "verified", "username": "alice"}
         with patch("business_travel.web.PostgresTravelMemory") as memory:
-            memory.return_value.read.return_value = {"preferences": [], "trip_history": []}
+            memory.return_value.read.return_value = {"trip_history": []}
             response = self.client.get("/api/memory")
             self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json(), {"trip_history": []})
             self.assertEqual(memory.call_args.args[1].user_id, "verified")
             self.assertEqual(self.client.get("/api/memory?user_id=victim").status_code, 400)
             self.assertEqual(memory.call_count, 1)

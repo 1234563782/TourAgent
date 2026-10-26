@@ -146,6 +146,60 @@ def lookup_lodging(rows: list[LodgingRow], *, destination: str, province: str | 
             "row_ids": list(dict.fromkeys(item[0].id for item in chosen))}
 
 
+def list_lodging(rows: list[LodgingRow], *, standard: str | None = None,
+                 day: date | None = None) -> dict:
+    """Return the complete source-bound lodging table for a selected grade.
+
+    This is a read-only projection of imported rows. It does not infer a city,
+    collapse residual "other areas" rows, or choose a personal destination.
+    When a date is supplied, the selected cap is included while ordinary and
+    seasonal values remain available for transparent table display.
+    """
+    if not rows:
+        return {"status": "empty", "reason": "lodging_table_unavailable", "rows": [], "row_ids": []}
+    headers = list(dict.fromkeys(header for row in rows for header in row.caps))
+    if standard:
+        if standard not in headers:
+            candidates = {header for header in headers
+                          if standard in {header + suffix for suffix in ("档", "档次", "标准")}}
+            if len(candidates) == 1:
+                standard = candidates.pop()
+            else:
+                return {"status": "insufficient_information", "reason": "lodging_standard_required",
+                        "missing_fields": ["lodging_standard"], "rows": [], "row_ids": []}
+    projected = []
+    for row in rows:
+        item = {
+            "row_id": row.id,
+            "source_id": row.source_id,
+            "region": row.region,
+            "localities": list(row.localities),
+            "unit": row.unit,
+            "currency": row.currency,
+            "caps": {key: str(value) for key, value in row.caps.items()},
+            "seasonal_localities": list(row.seasonal_localities),
+            "season_text": row.season_text,
+            "seasonal_caps": {key: str(value) for key, value in row.seasonal_caps.items()},
+        }
+        if standard:
+            item["lodging_standard"] = standard
+            item["ordinary_cap"] = item["caps"].get(standard)
+            item["seasonal_cap"] = item["seasonal_caps"].get(standard)
+            if day and row.seasons and row.seasonal_caps:
+                applies = (place_key(row.region) in {place_key(value) for value in row.seasonal_localities}
+                           or bool(set(row.seasonal_localities) & {"全市", "全省", "全区", "其他地区"}))
+                item["selected_cap"] = (item["seasonal_cap"] if applies
+                                         and any(window.includes(day) for window in row.seasons)
+                                         else item["ordinary_cap"])
+            else:
+                item["selected_cap"] = item["ordinary_cap"]
+        projected.append(item)
+    return {"status": "ok", "standard": standard, "grades": headers,
+            "unit": rows[0].unit, "currency": rows[0].currency,
+            "date": day.isoformat() if day else None,
+            "rows": projected, "row_ids": [item["row_id"] for item in projected]}
+
+
 def rows_from_snapshot(snapshot: dict, layout: dict, source_id: str) -> list[LodgingRow]:
     """Consume an explicit sheet layout; blank region cells resolve only within a numbered group."""
     if snapshot.get("schema_version") != 1 or snapshot.get("sheet") != layout["sheet"]:

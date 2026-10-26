@@ -166,6 +166,34 @@ class TelemetryTests(unittest.TestCase):
         self.assertEqual(self.records[-1].name, "tool")
         self.assertNotIn("private-", str(self.records[-1].metadata))
 
+    def test_jev_error_metadata_is_bounded_ascii(self):
+        self.assertEqual(
+            safe_metadata({
+                "error_code": "invalid_request_error",
+                "upstream_request_id": "req_123",
+            }),
+            {
+                "error_code": "invalid_request_error",
+                "upstream_request_id": "req_123",
+            },
+        )
+        self.assertEqual(safe_metadata({"error_code": "含有用户内容"}), {})
+        self.assertEqual(safe_metadata({"upstream_request_id": "line\nbreak"}), {})
+        self.assertEqual(safe_metadata({"error_code": "x" * 129}), {})
+
+    def test_policy_vector_degradation_metadata_is_allowlisted(self):
+        self.assertEqual(
+            safe_metadata({
+                "degraded": True,
+                "vector_error_code": "embedding_request_rejected_http_400_AllocationQuota.FreeTierOnly",
+            }),
+            {
+                "degraded": True,
+                "vector_error_code": "embedding_request_rejected_http_400_AllocationQuota.FreeTierOnly",
+            },
+        )
+        self.assertEqual(safe_metadata({"vector_error_code": "private provider response"}), {})
+
     def test_usage_is_written_to_langfuse_native_usage_details(self):
         usage = {"input_tokens": 5, "output_tokens": 2, "total_tokens": 7}
         self.assertEqual(safe_usage_details(usage), {"input": 5, "output": 2, "total": 7})

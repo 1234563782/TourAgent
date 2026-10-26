@@ -114,10 +114,10 @@ class StorageProviderTests(unittest.TestCase):
             legacy = root / "old"
             legacy.mkdir()
             file = legacy / "one.json"
-            text = '{"preferences":{"airlines":["test"]},"trip_history":[]}'
+            text = '{"preferences":{"airlines":["test"]},"trip_history":[{"id":"kept"}]}'
             file.write_text(text, encoding="utf-8")
             memory = TravelMemory(root / "new", legacy, "one")
-            self.assertEqual(memory.read()["preferences"], {"airlines": ["test"]})
+            self.assertEqual(memory.read(), {"trip_history": [{"id": "kept"}]})
             self.assertEqual(file.read_text(encoding="utf-8"), text)
 
     def test_provider_timeout_and_process_failure(self):

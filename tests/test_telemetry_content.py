@@ -234,6 +234,10 @@ class BusinessContentTests(telemetry_fixtures.BusinessTelemetryTests):
         graph = self.build([], provider=fixtures.FixtureProvider(empty=True),
                            slots=[fixtures.slot_response(self.trip, "plan_trip")])
         _, records = self.run_traced(graph, fixtures.PLAN_TEXT)
+        planning = next(row for row in records if row.name == "planning")
+        self.assertEqual(planning.options["input"]["request"]["origin"], self.trip["origin"])
+        self.assertEqual(planning.options["output"]["selection_status"], "no_candidates")
+        self.assertEqual(planning.options["output"]["missing_components"], ["outbound"])
         query = next(row for row in records if row.name == "query_flight")
         self.assertEqual(query.options["input"]["trip"]["origin"], self.trip["origin"])
         self.assertEqual(query.options["output"]["status"], "empty")

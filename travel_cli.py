@@ -92,7 +92,7 @@ def main():
             graph = build_assistant(lambda role: model, settings, memory, policy, checkpointer=checkpointer)
             console.print("Aligo | LangGraph")
             console.print("Development identity only; --user is not authentication.")
-            console.print("Commands: /exit /history /preferences /clear /resume")
+            console.print("Commands: /exit /history /clear /resume")
 
             def invoke(action):
                 with telemetry.request(config, identity, config["configurable"]["thread_id"],
@@ -127,8 +127,8 @@ def main():
                     continue
                 if query == "/exit":
                     return 0
-                if query in {"/history", "/preferences"}:
-                    console.print_json(data=memory.read()["trip_history" if query == "/history" else "preferences"])
+                if query == "/history":
+                    console.print_json(data=memory.read()["trip_history"])
                     continue
                 if query == "/clear":
                     import uuid

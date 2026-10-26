@@ -3,9 +3,7 @@
 ## 当前范围
 
 FastAPI 提供同源静态页面与 JSON API。登录后可以与差旅助手聊天、新建和切换历史对话。
-“差旅偏好”和“历史行程”展示区域及编辑弹窗已移除，已有数据和后台记忆能力保留。
-本人明确的长期偏好在聊天中经内容复核自动保存，不再要求保存授权；
-临时要求、他人信息、假设和明确拒绝保存的内容不应写入。可通过聊天查询或忘记偏好。
+不保存长期偏好，也不提供偏好查询或编辑。已确认行程草案仍按账号保留。
 不提供公开注册、找回密码、短信、邮件、SSO 或网页管理员后台。
 账号由有权操作服务器的管理员通过本机脚本创建。所有账号的 Web 权限相同。
 
@@ -68,7 +66,7 @@ FastAPI 提供同源静态页面与 JSON API。登录后可以与差旅助手聊
 .\.venv\Scripts\python.exe scripts/auth_admin.py prune
 ```
 
-重置、停用及启用不会删除偏好或行程。重复创建账号会报错，不覆盖原账号。
+重置、停用及启用不会删除行程。重复创建账号会报错，不覆盖原账号。
 过期会话即使未执行 `prune` 也不能使用；生产环境应配置运维清理任务。
 本轮未创建定时任务。
 
@@ -79,9 +77,7 @@ FastAPI 提供同源静态页面与 JSON API。登录后可以与差旅助手聊
 | `POST /api/auth/login` | JSON `{username, password}`，成功写入 Cookie |
 | `POST /api/auth/logout` | 撤销当前会话、清除 Cookie，重复退出也返回 204 |
 | `GET /api/auth/me` | 返回当前 `company_id`、`user_id`、`username` |
-| `GET /api/memory` | 返回当前用户 `preferences`、`trip_history` |
-| `GET /api/preferences` | 返回当前用户偏好记录 `items` 和快照 `revision` |
-| `PATCH /api/preferences` | 提交 `revision` 和 `changes`，原子执行逐项增改删 |
+| `GET /api/memory` | 返回当前用户已保存行程草案 `trip_history`，不返回长期偏好 |
 | `GET /api/conversations?offset=0` | 本人会话列表，每页50条，返回 `items` 和 `next_offset` |
 | `POST /api/conversations` | 服务端创建空白会话，返回会话 ID 和标题 |
 | `GET /api/conversations/{id}/chat` | 本会话消息、检查点版本、待确认事项和标题元数据 |
@@ -107,25 +103,7 @@ HTTPS 来源强制 Secure，本机 HTTP 仅允许 loopback。
 IP 限流返回 429；格式错误 422；非法来源 403；数据库不可用 503。
 错误返回不回显密码、连接串或完整输入，普通写请求内容上限为 4096 字节。
 聊天接口最多3000字符、20000字节，支持完整长度的中文消息。
-偏好冲突返回 409；必须刷新后重新核对，不自动重试覆盖。
-
-偏好操作示例（其中 revision 和 id 必须来自本人刚读取的快照）：
-
-```json
-{
-  "revision": "<GET 返回的 64 位摘要>",
-  "changes": [
-    {"operation": "update", "id": "<记录 ID>", "preference": {"type": "座位", "value": "靠过道"}}
-  ]
-}
-```
-
-新增使用 `operation: add`、携带 `preference`，不指定 ID；
-删除使用 `operation: delete` 和 ID，不携带 `preference`。
 接口不接受公司/用户查询参数或请求体身份，记录归属由登录会话决定。
-以上 API 仍保留鉴权和版本冲突保护，当前前端不再调用它们加载或编辑记录。
-直接 PATCH 是用户操作，不调用模型；聊天自动写入则经过独立内容复核。
-删除偏好不会清除历史对话检查点、备份或已经保存的行程。
 
 ## 对话持久化
 
@@ -137,7 +115,7 @@ IP 限流返回 429；格式错误 422；非法来源 403；数据库不可用 5
 - 原网页对话继续使用末尾为 `web` 的线程，在列表中显示为“原有对话”。
   不删除、搬迁或重写旧检查点。原 `/api/chat` 路径仍可访问，但写请求也必须携带 request_id，
   不保留无幂等键的旧请求格式；同步及流式入口统一使用同一执行逻辑。
-- 长期偏好和已保存行程仍按公司和用户共享，新建对话不会清空它们。
+- 已保存行程仍按公司和用户共享，新建对话不会清空它们。没有长期偏好存储。
 - 当前选中 ID 存于按公司和用户区分的 `sessionStorage`，不存登录凭据。
   待收尾的请求 ID 也暂存于此，恢复终态后清除；不存问题正文。
   未发送草稿仅在本页切换时保留，刷新或退出后清空；断流后刷新已完成答案时清除已发送草稿。
@@ -165,7 +143,7 @@ IP 限流返回 429；格式错误 422；非法来源 403；数据库不可用 5
 .\.venv\Scripts\python.exe -c "from business_travel.settings import Settings; from business_travel.conversations import setup_conversations; setup_conversations(Settings.from_env())"
 ```
 
-然后重启当前项目的 Web 服务。此步骤不修改偏好和历史消息。
+然后重启当前项目的 Web 服务。此步骤不修改历史消息。
 
 已有会话表的部署升级运行记录时，先执行：
 
@@ -177,7 +155,7 @@ IP 限流返回 429；格式错误 422；非法来源 403；数据库不可用 5
 
 ### 执行中断恢复
 
-- `GET /api/conversations/{conversation_id}/recovery`：核实当前偏好及失败请求开始后保存的行程草案。
+- `GET /api/conversations/{conversation_id}/recovery`：核实失败请求开始后保存的行程草案。
   这些草案可能含其他会话的写入，不能精确归因，也不代表预订成功。
 - `POST /api/conversations/{conversation_id}/recovery`：提交 GET 返回的 `run_id`、
   `review_revision` 和严格布尔值 `confirmed: true`；沿用登录、同源、归属和会话锁校验。

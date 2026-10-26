@@ -13,10 +13,12 @@ from docx import Document
 
 from business_travel.policy_documents import PolicyBundle, parse_docx
 from business_travel.policy_guard import render_policy
-from business_travel.policy_lodging import LodgingRow, lookup_lodging, parse_seasons
+from business_travel.policy_lodging import LodgingRow, list_lodging, lookup_lodging, parse_seasons
 from business_travel.policy_package import prepare_package
 from business_travel.policy_rules import ExpenseFacts
-from business_travel.university_policy import UniversityRules, check_university_expense, transport_category
+from business_travel.university_policy import (UniversityRules, check_university_expense,
+                                                lodging_standard_for, planning_standards_for,
+                                                transport_category)
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "policies/hfut-2026/manifest.json"
@@ -52,6 +54,14 @@ class UniversityPolicyTests(unittest.TestCase):
         self.assertEqual(self.bundle.digest(), prepare_package(MANIFEST, company_id="test_school").digest())
         for source in self.bundle.sources:
             self.assertEqual(source.sha256, hashlib.sha256((MANIFEST.parent / source.source).read_bytes()).hexdigest())
+
+    def test_all_region_projection_keeps_every_source_row_and_selected_grade(self):
+        result = list_lodging(self.rows, standard="部级")
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(len(result["rows"]), 86)
+        self.assertEqual(result["row_ids"][0], "lodging-r9")
+        self.assertTrue(all(row["ordinary_cap"] for row in result["rows"]))
+        self.assertEqual(result["rows"][0]["lodging_standard"], "部级")
 
     def test_every_rule_clause_has_body_evidence(self):
         clauses = {c.clause for c in self.bundle.chunks}
@@ -168,10 +178,37 @@ class UniversityPolicyTests(unittest.TestCase):
         self.assertTrue(window.includes(date(2026, 1, 1)))
         self.assertFalse(window.includes(date(2026, 4, 1)))
 
-    def test_unknown_lodging_rank_is_never_inferred_from_title(self):
+    def test_transport_identity_does_not_choose_lodging_grade(self):
+        facts = self.facts(lodging_standard=None, academic_title="院士", transport_standard="一类")
+        self.assertEqual(transport_category(facts, self.rules), "一类")
+        self.assertIsNone(lodging_standard_for(facts, self.rules))
         result = self.check(lodging_standard=None, academic_title="院士", transport_standard="一类")
         self.assertEqual(result["missing_fields"], ["lodging_standard"])
-        self.assertFalse(result["approved"])
+
+    def test_transport_category_does_not_choose_lodging_grade(self):
+        for category in ("一类", "二类", "三类"):
+            with self.subTest(category=category):
+                facts = self.facts(lodging_standard=None, transport_standard=category)
+                self.assertIsNone(lodging_standard_for(facts, self.rules))
+                self.assertEqual(planning_standards_for(facts, self.rules), (category, None))
+
+    def test_student_planning_does_not_assume_third_class(self):
+        facts = self.facts(personnel_type="student", student_activity_eligible=None,
+                           transport_standard=None, lodging_standard=None)
+        self.assertEqual(planning_standards_for(facts, self.rules), (None, None))
+        self.assertIsNone(transport_category(facts, self.rules))
+        result = self.check(personnel_type="student", student_activity_eligible=None,
+                            transport_standard="三类", lodging_standard="其他人员")
+        self.assertEqual(result["status"], "insufficient_information")
+        self.assertEqual(result["missing_fields"], ["student_activity_eligible"])
+
+    def test_transport_category_label_is_not_a_lodging_header(self):
+        for category in ("一类", "二类", "三类"):
+            with self.subTest(category=category):
+                facts = self.facts(lodging_standard=category, transport_standard=category)
+                self.assertIsNone(lodging_standard_for(facts, self.rules))
+                result = self.check(lodging_standard=category, transport_standard=category)
+                self.assertEqual(result["missing_fields"], ["lodging_standard"])
 
     def test_explicit_rank_suffix_matches_only_an_existing_header(self):
         baseline = self.check(lodging_standard="其他人员")
@@ -180,7 +217,7 @@ class UniversityPolicyTests(unittest.TestCase):
                 checked = self.check(lodging_standard=label)
                 self.assertEqual(checked["status"], baseline["status"])
                 self.assertEqual(checked["cap"], baseline["cap"])
-        for label in ("普通人员", "教授", "二类", "不是其他人员档"):
+        for label in ("普通人员", "教授", "不是其他人员档"):
             self.assertEqual(self.check(lodging_standard=label)["missing_fields"], ["lodging_standard"])
 
     def test_person_day_not_automatically_shared_room_division(self):
@@ -214,6 +251,15 @@ class UniversityPolicyTests(unittest.TestCase):
         self.assertIsNone(transport_category(self.facts(academic_title="院士", transport_standard="三类"),
                                             self.rules))
         self.assertEqual(transport_category(self.facts(technical_grade=2), self.rules), "二类")
+
+    def test_employee_grade_is_not_treated_as_academic_title(self):
+        facts = self.facts(academic_title=None, employee_grade="院士",
+                           transport_standard=None, lodging_standard=None)
+        self.assertIsNone(transport_category(facts, self.rules))
+        self.assertIsNone(lodging_standard_for(facts, self.rules))
+        self.assertIsNone(transport_category(
+            self.facts(academic_title=None, employee_grade="普通员工",
+                       transport_standard=None, lodging_standard=None), self.rules))
 
     def test_transport_requests_only_absent_fields(self):
         for mode, seat, expected in (
@@ -282,7 +328,7 @@ class UniversityPolicyTests(unittest.TestCase):
         result = self.check(lodging_standard=None)
         text = render_policy({"rule_checks": [{"facts": self.facts(lodging_standard=None).model_dump(),
                                                "result": result}]})
-        self.assertIn("住宿附表人员档次", text)
+        self.assertIn("住宿人员档次", text)
         self.assertNotIn("、职级", text)
         text = render_policy({"rule_checks": [{"facts": self.facts().model_dump(), "result": self.check()}]})
         self.assertIn("人·天", text)
@@ -297,7 +343,7 @@ class UniversityPolicyTests(unittest.TestCase):
             "result": {"status": "insufficient_information", "reason": "unsupported_user_facts",
                        "missing_fields": ["lodging_standard"]},
         }]})
-        self.assertIn("住宿附表人员档次", text)
+        self.assertIn("住宿人员档次", text)
         self.assertNotIn("职级", text)
 
 

@@ -322,13 +322,12 @@ class ContextGraphTests(unittest.TestCase):
 
     def test_old_authorization_never_bypasses_current_content_review(self):
         config = replace(self.settings, context_recent_tokens=256)
-        graph = self.build([slot_response()], [call("save_preferences", {
-            "preferences": [{"type": "hotel", "value": "安静"}]}, "save"),
+        graph = self.build([slot_response()], [call("query_memory", {}, "mem"),
             AIMessage("未保存")], config=config)
         result = graph.invoke({"messages": [HumanMessage("以前我说过请保存"), AIMessage("历史回答"),
                                             HumanMessage("现在先别保存")]}, self.config)
         self.assertFalse(result.get("__interrupt__"))
-        self.assertEqual(self.memory.read()["preferences"], [])
+        self.assertNotIn("preferences", self.memory.read())
 
     def test_oversized_current_turn_blocks_before_any_model_or_tool_and_keeps_original(self):
         config = replace(self.settings, context_role_input_tokens={"slots": 1024})

@@ -22,8 +22,7 @@ from business_travel.memory_pg import (
 )
 from business_travel.policy import PolicyStore
 from business_travel.settings import Settings
-from business_travel.preferences import PreferenceConflict, PreferenceMutation
-from test_travel_graph import ScriptedModel, call, slot_response, review_response
+from tests.test_travel_graph import ScriptedModel, call, slot_response, review_response
 from business_travel.fact_context import fact_context
 from business_travel.execution_events import public_graph_events
 
@@ -51,7 +50,6 @@ class PostgresIntegrationTests(unittest.TestCase):
         self.identity = MemoryIdentity(self.settings.memory_company_id, "test_" + uuid.uuid4().hex)
         self.memory = PostgresTravelMemory(self.settings, self.identity)
         self.config = {"configurable": {"thread_id": self.identity.thread_id("same")}}
-        self.prefs = [{"type": "seat", "value": "aisle"}]
 
     def graph(self, saver, responses, memory=None, slot_responses=None, reviews=None):
         model = ScriptedModel(responses)
@@ -119,7 +117,7 @@ class PostgresIntegrationTests(unittest.TestCase):
                 stream_mode=["custom", "updates"])))
             self.assertTrue(graph.get_state(self.config).interrupts)
             self.assertFalse(any(kind == "delta" for kind, _ in events))
-            self.assertEqual(self.memory.read()["preferences"], [])
+            self.assertNotIn("preferences", self.memory.read())
         with open_checkpointer(self.settings, self.identity) as saver:
             graph = self.graph(saver, [AIMessage(content="Cancelled")])
             events = list(public_graph_events(graph.stream(Command(resume=False), self.config,
@@ -131,72 +129,22 @@ class PostgresIntegrationTests(unittest.TestCase):
                              current.values["messages"][-1].content)
             other = {"configurable": {"thread_id": self.identity.thread_id("different")}}
             self.assertFalse(graph.get_state(other).values)
-        self.assertEqual(self.memory.read()["preferences"], [])
+        self.assertNotIn("preferences", self.memory.read())
         self.assertEqual(self.memory.read()["trip_history"], [])
 
-    def test_preferences_survive_reconstruction_and_are_company_user_scoped(self):
-        self.memory.save_preferences(self.prefs)
-        self.assertEqual(PostgresTravelMemory(self.settings, self.identity).read()["preferences"], self.prefs)
+    def test_saved_trips_survive_reconstruction_and_are_identity_scoped(self):
+        draft = {"id": "private-trip"}
+        self.memory.save_trip(draft)
+        self.assertEqual(PostgresTravelMemory(self.settings, self.identity).read(),
+                         {"trip_history": [draft]})
         other = MemoryIdentity(self.identity.company_id, "different")
-        self.assertEqual(PostgresTravelMemory(self.settings, other).read()["preferences"], [])
+        self.assertEqual(PostgresTravelMemory(self.settings, other).read(), {"trip_history": []})
         other_settings = replace(self.settings, memory_company_id="other_company")
-        other_memory = PostgresTravelMemory(other_settings, MemoryIdentity("other_company", self.identity.user_id))
-        self.assertEqual(other_memory.read(), {"preferences": [], "trip_history": []})
-        other_memory.save_preferences([{"type": "seat", "value": "window"}])
-        self.assertEqual(self.memory.read()["preferences"], self.prefs)
-
-    def test_item_updates_restart_delete_and_stale_revision(self):
-        baseline = self.memory.preference_snapshot()
-        first = self.memory.mutate_preferences(PreferenceMutation(
-            revision=baseline["revision"], changes=[
-                {"operation": "add", "preference": {"type": "seat", "value": "window"}},
-                {"operation": "add", "preference": {"type": "hotel", "value": "quiet"}},
-            ]), {"kind": "user_interface"})
-        rebuilt = PostgresTravelMemory(self.settings, self.identity)
-        self.assertEqual(rebuilt.preference_snapshot(), first)
-        with self.assertRaises(PreferenceConflict):
-            rebuilt.mutate_preferences(PreferenceMutation(revision=baseline["revision"], changes=[
-                {"operation": "delete", "id": first["items"][0]["id"]}]), {})
-        second = rebuilt.mutate_preferences(PreferenceMutation(revision=first["revision"], changes=[
-            {"operation": "delete", "id": first["items"][0]["id"]}]), {"kind": "user_interface"})
-        self.assertEqual(second["items"], [first["items"][1]])
-
-    def test_mutation_batch_rolls_back_and_other_identity_cannot_target_record(self):
-        self.memory.save_preferences(self.prefs)
-        current = self.memory.preference_snapshot()
-        with self.assertRaises(PreferenceConflict):
-            self.memory.mutate_preferences(PreferenceMutation(revision=current["revision"], changes=[
-                {"operation": "add", "preference": {"type": "hotel", "value": "quiet"}},
-                {"operation": "delete", "id": "missing"},
-            ]), {})
-        self.assertEqual(self.memory.preference_snapshot(), current)
-        for company, user in [(self.identity.company_id, "other"), ("other_company", self.identity.user_id)]:
-            other = PostgresTravelMemory(replace(self.settings, memory_company_id=company), MemoryIdentity(company, user))
-            with self.assertRaises(PreferenceConflict):
-                other.mutate_preferences(PreferenceMutation(revision=other.preference_snapshot()["revision"], changes=[
-                    {"operation": "delete", "id": current["items"][0]["id"]},
-                ]), {})
-        self.assertEqual(self.memory.preference_snapshot(), current)
-
-    def test_concurrent_updates_have_one_winner(self):
-        from concurrent.futures import ThreadPoolExecutor
-        from threading import Barrier
-        revision = self.memory.preference_snapshot()["revision"]
-        barrier = Barrier(2)
-
-        def write(value):
-            barrier.wait(timeout=10)
-            try:
-                self.memory.mutate_preferences(PreferenceMutation(revision=revision, changes=[
-                    {"operation": "add", "preference": {"type": "seat", "value": value}},
-                ]), {"kind": "user_interface"})
-                return "saved"
-            except PreferenceConflict:
-                return "conflict"
-
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            self.assertCountEqual(list(pool.map(write, ["aisle", "window"])), ["saved", "conflict"])
-        self.assertEqual(len(self.memory.preference_snapshot()["items"]), 1)
+        other_memory = PostgresTravelMemory(
+            other_settings, MemoryIdentity("other_company", self.identity.user_id))
+        self.assertEqual(other_memory.read(), {"trip_history": []})
+        other_memory.save_trip({"id": "other-company-trip"})
+        self.assertEqual(self.memory.read(), {"trip_history": [draft]})
 
     def test_trips_are_idempotent_ordered_bounded_and_conflicts_preserve_original(self):
         for idx in range(12):
@@ -208,32 +156,6 @@ class PostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(len(history), 10)
         self.assertEqual(history[0], {"id": "trip-11", "value": 11})
         self.assertEqual(history[-1]["id"], "trip-2")
-
-    def test_automatic_preferences_survive_connection_and_graph_restart(self):
-        args = {"preferences": self.prefs, "context": {
-            "subject": "self", "scope": "long_term", "assertion": "actual", "quote": "I prefer aisle seats"}}
-        with open_checkpointer(self.settings, self.identity) as saver:
-            graph = self.graph(saver, [call("save_preferences", args, "save"), AIMessage(content="Saved")],
-                reviews=[review_response(), call("PreferenceReview", {
-                    "decision": "accept", "quote": "I prefer aisle seats"}, "review-pref")])
-            result = graph.invoke({"messages": [HumanMessage(content="I prefer aisle seats")]}, self.config)
-            self.assertNotIn("__interrupt__", result)
-            self.assertEqual(self.memory.read()["preferences"], self.prefs)
-        with open_checkpointer(self.settings, self.identity) as saver:
-            graph = self.graph(saver, [])
-            self.assertFalse(graph.get_state(self.config).next)
-            self.assertEqual(graph.get_state(self.config).values["messages"], result["messages"])
-        reopened = PostgresTravelMemory(self.settings, self.identity)
-        self.assertEqual(reopened.read()["preferences"], self.prefs)
-        self.assertEqual(self.memory.read()["preferences"], self.prefs)
-
-    def test_missing_preference_context_does_not_write_or_interrupt(self):
-        with open_checkpointer(self.settings, self.identity) as saver:
-            graph = self.graph(saver, [call("save_preferences", {"preferences": self.prefs}, "save"),
-                                       AIMessage(content="Cancelled")])
-            result = graph.invoke({"messages": [HumanMessage(content="Remember")]}, self.config)
-            self.assertNotIn("__interrupt__", result)
-        self.assertEqual(self.memory.read()["preferences"], [])
 
     def trip_fixture(self):
         subject = {"id": "synthetic-subject", "revision": 1, "values": {}, "provenance": {}}
@@ -271,7 +193,6 @@ class PostgresIntegrationTests(unittest.TestCase):
 
     def source(self, root, *, interrupt=False):
         memory = TravelMemory(root, root / "legacy", self.identity.user_id)
-        memory.save_preferences(self.prefs)
         memory.save_trip({"id": "old-trip"})
         if interrupt:
             config = {"configurable": {"thread_id": f"{self.identity.user_id}:same"}}
@@ -282,22 +203,25 @@ class PostgresIntegrationTests(unittest.TestCase):
                     "slots": {"trip": subject, "subjects": {subject["id"]: subject}}}, config)["__interrupt__"])
         return read_snapshot(root, root / "legacy", self.identity.user_id)
 
-    def test_migration_is_repeatable_without_overwriting_new_preferences(self):
+    def test_migration_is_repeatable_without_overwriting_new_trips(self):
         with tempfile.TemporaryDirectory() as temp:
             snapshot = self.source(Path(temp))
+            self.assertNotIn("preferences", snapshot.summary())
             self.assertEqual(import_snapshot(self.settings, snapshot)["status"], "imported")
-            self.memory.save_preferences([])
+            self.memory.save_trip({"id": "later-trip", "value": 2})
             self.assertEqual(import_snapshot(self.settings, snapshot)["status"], "already_imported")
-        self.assertEqual(self.memory.read()["preferences"], [])
-        self.assertEqual(self.memory.read()["trip_history"], [{"id": "old-trip"}])
+        history = self.memory.read()["trip_history"]
+        self.assertIn({"id": "old-trip"}, history)
+        self.assertIn({"id": "later-trip", "value": 2}, history)
+        self.assertNotIn("preferences", self.memory.read())
 
-    def test_trip_conflict_rolls_back_preferences_and_preserves_target(self):
+    def test_trip_conflict_rolls_back_and_preserves_target(self):
         self.memory.save_trip({"id": "old-trip", "value": "existing"})
         with tempfile.TemporaryDirectory() as temp:
             snapshot = self.source(Path(temp))
             with self.assertRaises(ValueError):
                 import_snapshot(self.settings, snapshot)
-        self.assertEqual(self.memory.read()["preferences"], [])
+        self.assertNotIn("preferences", self.memory.read())
         self.assertEqual(self.memory.read()["trip_history"], [{"id": "old-trip", "value": "existing"}])
 
     def test_checkpoint_conflict_rolls_back_entire_import(self):
@@ -308,22 +232,25 @@ class PostgresIntegrationTests(unittest.TestCase):
             snapshot = self.source(Path(temp), interrupt=True)
             with self.assertRaises(ValueError):
                 import_snapshot(self.settings, snapshot)
-        self.assertEqual(self.memory.read(), {"preferences": [], "trip_history": []})
+        self.assertEqual(self.memory.read(), {"trip_history": []})
 
     def test_verification_failure_rolls_back_all_rows_and_import_marker(self):
         with tempfile.TemporaryDirectory() as temp:
             snapshot = self.source(Path(temp), interrupt=True)
             with patch.object(ScopedPostgresSaver, "get_tuple", return_value=None), self.assertRaises(ValueError):
                 import_snapshot(self.settings, snapshot)
-            self.assertEqual(self.memory.read(), {"preferences": [], "trip_history": []})
+            self.assertEqual(self.memory.read(), {"trip_history": []})
             with open_checkpointer(self.settings, self.identity) as saver:
                 self.assertIsNone(saver.get_tuple(self.config))
             self.assertEqual(import_snapshot(self.settings, snapshot)["status"], "imported")
 
-    def test_setup_is_repeatable_and_preserves_records(self):
-        self.memory.save_preferences(self.prefs)
+    def test_setup_is_repeatable_and_preserves_trips(self):
+        self.memory.save_trip({"id": "kept", "value": 1})
         setup_memory(self.settings)
-        self.assertEqual(self.memory.read()["preferences"], self.prefs)
+        self.assertEqual(self.memory.read(), {"trip_history": [{"id": "kept", "value": 1}]})
+        with memory_connection(self.settings) as connection:
+            self.assertIsNone(connection.execute(
+                "SELECT to_regclass('user_preferences') AS name").fetchone()["name"])
 
     def test_migrated_interrupt_can_be_approved_after_restart(self):
         self.migrate_interrupt(True)
@@ -347,7 +274,7 @@ class PostgresIntegrationTests(unittest.TestCase):
                 graph.invoke(Command(resume=approved), self.config)
                 self.assertFalse(graph.get_state(self.config).next)
             self.assertEqual(import_snapshot(self.settings, snapshot)["status"], "already_imported")
-        self.assertEqual(self.memory.read()["preferences"], self.prefs)
+        self.assertNotIn("preferences", self.memory.read())
         expected = [self.trip_fixture()[1], {"id": "old-trip"}] if approved else [{"id": "old-trip"}]
         self.assertEqual(self.memory.read()["trip_history"], expected)
 

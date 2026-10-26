@@ -1,6 +1,6 @@
 """Deterministic checks of reviewed policy data, one expense day/night at a time."""
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
@@ -9,11 +9,20 @@ from pydantic import Field, model_validator
 from .contracts import Contract
 
 
+class NightlyExpense(Contract):
+    date: date
+    amount: Decimal = Field(ge=0, allow_inf_nan=False,
+                            description="Explicit personal expense for this night, never an averaged total.")
+
+
 class ExpenseFacts(Contract):
     kind: Literal["hotel", "transport", "meal", "local_transport"]
     expense_date: date = Field(description=
         "Actual or planned expense/stay date only. Policy publication dates or years are not expense dates. "
         "For explanations, leave unknown unless the user provides an actual business date.")
+    expense_end: date | None = Field(default=None,
+        description="Inclusive last calendar day of the trip window for meal and local-transport allowances; "
+                    "expense_date is the first day. Never a hotel checkout date and never used to stretch a hotel stay.")
     destination: str = Field(min_length=1, max_length=100,
                             description="Expense city, required for every expense kind, including local transport.")
     employee_grade: str | None = Field(default=None,
@@ -22,28 +31,57 @@ class ExpenseFacts(Contract):
     academic_title: str | None = Field(default=None, description="Explicit academic title, not a preference.")
     technical_grade: int | None = Field(default=None, ge=1)
     management_grade: int | None = Field(default=None, ge=1)
-    transport_standard: str | None = Field(default=None, description="Explicit transport category; never infer from lodging rank.")
-    lodging_standard: str | None = Field(default=None, description="Explicit lodging table rank, not inferred from title/transport category.")
+    transport_standard: str | None = Field(default=None, description="Applicable transport category, resolved from explicit facts and active policy.")
+    lodging_standard: str | None = Field(default=None, description="Lodging table rank, resolved from explicit facts and active policy.")
     destination_province: str | None = Field(default=None, max_length=100)
     trip_context: Literal["ordinary", "conference", "training", "research", "fieldwork",
-                          "self_drive", "rental", "noon_rest"] | None = None
+                          "self_drive", "rental", "noon_rest"] | None = Field(default=None,
+        description="ordinary for a plain business trip; conference or training only when the user says the trip is one. "
+                    "Never turn a plain trip into a conference.")
     student_activity_eligible: bool | None = None
     organizer_provides_meals: bool | None = None
     in_transit_day: bool | None = None
+    in_transit_dates: list[date] | None = Field(default=None, max_length=366,
+        description="Explicit travel days inside the allowance window when a conference or training host provides meals. "
+                    "Only these days receive meal allowance. Never infer them from distance, ticket count or the trip length.")
+    departure_at: datetime | None = Field(default=None,
+        description="Departure date and local clock time printed on ONE intercity ticket. "
+                    "Never estimated from distance, timetable or a chain of several tickets.")
+    arrival_at: datetime | None = Field(default=None,
+        description="Arrival date and local clock time printed on the SAME ticket as departure_at. "
+                    "Null when the ticket does not show it; then no 12-hour add-on is calculated.")
     local_transport_method: Literal["allowance", "receipts"] | None = None
     paid_by_other_organization: bool | None = None
     organizer_arranged_lodging: bool | None = Field(default=None,
         description="Conference/training lodging arranged by the organizer AND paid by the traveler.")
     organizer_lodging_proof: bool | None = None
-    mainland_business_trip: bool | None = None
+    mainland_business_trip: bool | None = Field(default=None,
+        description="True only for a business trip inside mainland China, including a domestic city named as the destination. "
+                    "False for Hong Kong, Macau, Taiwan or a foreign country. Null when the trip scope is not stated.")
     long_assignment_days: int | None = Field(default=None, ge=1,
         description="User-confirmed total trip or continuous assignment days, including short trips. Never default to zero.")
     special_approval: bool | None = Field(default=None,
         description="Whether special authorization has actually been GRANTED for this expense. "
                     "True means an approved outcome, not merely an application or an ongoing process. "
                     "False means authorization is not currently granted. Null means unknown.")
+    expense_scenario: Literal["actual", "hypothetical"] = Field(default="actual",
+        description="actual only for incurred expenses; hypothetical for proposed/conditional costs. "
+                    "Keep hypothetical and actual expenses in separate subjects.")
     amount: Decimal | None = Field(default=None, ge=0, allow_inf_nan=False,
-        description="Actual expense incurred, not a proposed allowance or amount in a question.")
+        description="User-stated expense amount, interpreted using expense_scenario and amount_scope. "
+                    "Never store a policy allowance as an expense or a hypothetical as an actual cost.")
+    amount_scope: Literal["single", "uniform_nightly", "stay_total"] = Field(default="single",
+        description="single: one night/ticket; uniform_nightly: explicitly the same price EVERY night; "
+                    "stay_total: total for the whole stay. Never infer nightly prices by averaging.")
+    check_out: date | None = Field(default=None,
+        description="Exclusive checkout date; expense_date is the first night. Preserve stated dates.")
+    nightly_amounts: list[NightlyExpense] | None = Field(default=None, max_length=366,
+        description="Explicit personal per-night costs, preserving dates and amounts; not model-generated allocation.")
+    transport_amount_scope: Literal["fare_only", "total", "unknown"] = Field(default="unknown",
+        description="fare_only if amount explicitly excludes ancillary fees; total if mixed payment. "
+                    "A bare payment or ticket total does not establish its breakdown.")
+    fare_amount: Decimal | None = Field(default=None, ge=0, allow_inf_nan=False,
+        description="Explicit fare component of a mixed transport payment, excluding ancillary fees.")
     currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$",
         description="ISO 4217 uppercase three-letter currency code, not a currency name or symbol. "
                     "Normalize only a currency explicitly identified by the user; preserve that original "
@@ -71,6 +109,26 @@ class ExpenseFacts(Contract):
     local_transport_coverage: Literal["all", "partial", "none"] | None = None
     self_paid_local_travel: bool | None = None
     local_car_cost_reimbursed: bool | None = None
+
+    @model_validator(mode="after")
+    def valid_expense_window(self):
+        if self.expense_end is not None:
+            if self.expense_end < self.expense_date:
+                raise ValueError("expense_end must not be before expense_date")
+            if (self.expense_end - self.expense_date).days + 1 > 366:
+                raise ValueError("expense window is too long")
+        if self.departure_at is not None and self.arrival_at is not None:
+            if self.arrival_at <= self.departure_at:
+                raise ValueError("arrival_at must be after departure_at")
+            if (self.arrival_at - self.departure_at).total_seconds() > 72 * 3600:
+                raise ValueError("one ticket cannot span more than 72 hours")
+        if self.in_transit_dates is not None:
+            if len(set(self.in_transit_dates)) != len(self.in_transit_dates):
+                raise ValueError("in_transit_dates must not repeat a date")
+            for day in self.in_transit_dates:
+                if day < self.expense_date or (self.expense_end is not None and day > self.expense_end):
+                    raise ValueError("in_transit_dates must fall inside the expense window")
+        return self
 
 
 class ReviewedRules(Contract):

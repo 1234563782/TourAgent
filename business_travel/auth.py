@@ -121,6 +121,22 @@ def setup_auth(settings):
             )
         """)
 
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS auth_personnel (
+                company_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                personnel_type TEXT,
+                academic_title TEXT,
+                technical_grade INTEGER,
+                management_grade INTEGER,
+                lodging_standard TEXT,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (company_id, user_id),
+                FOREIGN KEY (company_id, user_id)
+                    REFERENCES auth_users(company_id, user_id) ON DELETE CASCADE
+            )
+        """)
+
 
 class AuthStore:
     def __init__(self, settings, config: AuthSettings):
@@ -133,6 +149,7 @@ class AuthStore:
             connection.execute("SELECT user_id FROM auth_users LIMIT 0")
             connection.execute("SELECT token_hash FROM auth_sessions LIMIT 0")
             connection.execute("SELECT client_hash FROM auth_login_limits LIMIT 0")
+            connection.execute("SELECT user_id FROM auth_personnel LIMIT 0")
 
     def create_user(self, username, password):
         username = username_value(username)
@@ -229,6 +246,51 @@ class AuthStore:
             with memory_connection(self.settings) as connection:
                 connection.execute("DELETE FROM auth_sessions WHERE token_hash=%s AND company_id=%s",
                                    (token_digest(token), self.company))
+
+
+    def get_personnel_by_username(self, username):
+        username = username_value(username)
+        with memory_connection(self.settings) as connection:
+            user = connection.execute(
+                "SELECT user_id FROM auth_users WHERE company_id=%s AND username=%s",
+                (self.company, username),
+            ).fetchone()
+        if user is None:
+            raise ValueError("账号不存在")
+        return self.get_personnel(user["user_id"])
+
+    def get_personnel(self, user_id):
+        from .personnel import PersonnelProfile
+        with memory_connection(self.settings) as connection:
+            row = connection.execute(
+                "SELECT personnel_type, academic_title, technical_grade, management_grade, lodging_standard "
+                "FROM auth_personnel WHERE company_id=%s AND user_id=%s",
+                (self.company, user_id),
+            ).fetchone()
+        return PersonnelProfile.model_validate(dict(row)) if row else PersonnelProfile()
+
+    def set_personnel(self, username, profile):
+        from .personnel import PersonnelProfile
+        username = username_value(username)
+        profile = profile if isinstance(profile, PersonnelProfile) else PersonnelProfile.model_validate(profile)
+        with memory_connection(self.settings) as connection, connection.transaction():
+            user = connection.execute(
+                "SELECT user_id FROM auth_users WHERE company_id=%s AND username=%s",
+                (self.company, username),
+            ).fetchone()
+            if user is None:
+                raise ValueError("账号不存在")
+            connection.execute(
+                "INSERT INTO auth_personnel(company_id,user_id,personnel_type,academic_title,"
+                "technical_grade,management_grade,lodging_standard) VALUES(%s,%s,%s,%s,%s,%s,%s) "
+                "ON CONFLICT(company_id,user_id) DO UPDATE SET "
+                "personnel_type=excluded.personnel_type, academic_title=excluded.academic_title, "
+                "technical_grade=excluded.technical_grade, management_grade=excluded.management_grade, "
+                "lodging_standard=excluded.lodging_standard, updated_at=now()",
+                (self.company, user["user_id"], profile.personnel_type, profile.academic_title,
+                 profile.technical_grade, profile.management_grade, profile.lodging_standard),
+            )
+        return profile
 
     def prune(self):
         with memory_connection(self.settings) as connection, connection.transaction():

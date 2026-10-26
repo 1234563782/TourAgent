@@ -80,8 +80,8 @@ class ConversationLiveTests(unittest.TestCase):
         self.assertEqual([r["id"] for r in other.list()["items"]], ["web"])
 
     def test_real_checkpoints_and_pending_confirmation_are_separate(self):
-        shared = [{"type": "座位", "value": "靠窗"}]
-        PostgresTravelMemory(self.settings, self.identity).save_preferences(shared)
+        shared = {"id": "shared-draft", "note": "kept"}
+        PostgresTravelMemory(self.settings, self.identity).save_trip(shared)
         first, second = self.store.create()["id"], self.store.create()["id"]
         a = {"configurable": {"thread_id": self.identity.thread_id(first)}}
         b = {"configurable": {"thread_id": self.identity.thread_id(second)}}
@@ -104,10 +104,12 @@ class ConversationLiveTests(unittest.TestCase):
             graph.invoke(Command(resume=False), a)
             self.assertEqual(graph.get_state(a).values["messages"][-1].content, "cancelled")
             self.assertEqual(graph.get_state(b).values["messages"][-1].content, "收到：B")
-        # Conversation creation does not create an independent preference store.
-        self.assertEqual(PostgresTravelMemory(self.settings, self.identity).read()["preferences"], shared)
+        # Conversation creation does not fork saved trips into another user.
+        saved = PostgresTravelMemory(self.settings, self.identity).read()
+        self.assertEqual(saved["trip_history"], [shared])
+        self.assertNotIn("preferences", saved)
         other = MemoryIdentity(self.identity.company_id, uuid4().hex)
-        self.assertEqual(PostgresTravelMemory(self.settings, other).read()["preferences"], [])
+        self.assertEqual(PostgresTravelMemory(self.settings, other).read()["trip_history"], [])
 
     def test_locks_are_per_conversation_and_release_after_contention(self):
         first, second = self.store.create()["id"], self.store.create()["id"]

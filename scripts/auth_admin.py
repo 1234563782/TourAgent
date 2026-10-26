@@ -31,8 +31,15 @@ def prompt_password():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["init", "init-runs", "init-resources", "create-user", "reset-password",
-                                          "disable", "enable", "prune"])
+                                          "disable", "enable", "prune", "show-identity", "set-identity"])
     parser.add_argument("--username")
+    parser.add_argument("--personnel-type", choices=["staff", "student", "invited"])
+    parser.add_argument("--academic-title")
+    parser.add_argument("--technical-grade", type=int)
+    parser.add_argument("--management-grade", type=int)
+    parser.add_argument("--lodging-standard", choices=["部级", "司局级", "其他人员"])
+    parser.add_argument("--clear-transport", action="store_true")
+    parser.add_argument("--clear-lodging", action="store_true")
     args = parser.parse_args()
     if args.command not in {"init", "init-runs", "init-resources", "prune"} and not args.username:
         parser.error("此命令需要 --username")
@@ -46,6 +53,28 @@ def main():
             setup_chat_runs(settings)
         elif args.command == "init-resources":
             setup_resources(settings)
+        elif args.command == "show-identity":
+            import json
+            print(json.dumps(store.get_personnel_by_username(args.username).model_dump(), ensure_ascii=False))
+        elif args.command == "set-identity":
+            from business_travel.personnel import PersonnelProfile
+            current = store.get_personnel_by_username(args.username)
+            payload = current.model_dump()
+            if args.clear_transport:
+                payload.update(personnel_type=None, academic_title=None, technical_grade=None, management_grade=None)
+            if args.clear_lodging:
+                payload["lodging_standard"] = None
+            if args.personnel_type:
+                payload["personnel_type"] = args.personnel_type
+            if args.academic_title:
+                payload["academic_title"] = args.academic_title
+            if args.technical_grade is not None:
+                payload["technical_grade"] = args.technical_grade
+            if args.management_grade is not None:
+                payload["management_grade"] = args.management_grade
+            if args.lodging_standard:
+                payload["lodging_standard"] = args.lodging_standard
+            store.set_personnel(args.username, PersonnelProfile.model_validate(payload))
         elif args.command == "create-user":
             store.create_user(args.username, prompt_password())
         elif args.command == "reset-password":

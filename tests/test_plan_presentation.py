@@ -59,17 +59,15 @@ class PlanPresentationTests(unittest.TestCase):
         text = render_draft(data)
         main = main_text(text)
         self.assertIn("甲市 ⇄ 乙市", main)
-        self.assertLess(main.index("交通参考"), main.index("待补充"))
+        self.assertLess(text.index("交通参考"), text.index("核验与补充说明"))
         self.assertIn("270.5 CNY", main)
         self.assertIn("每张票", main)
         self.assertIn("入住：2099-10-12", main)
         self.assertIn("2晚", main)
-        self.assertIn("不能确认合规", main)
-        self.assertIn("逐晚含税价格", main)
-        self.assertEqual(main.count("是否大陆因公出差"), 1)
-        self.assertIn("计价口径：待核实", main)
-        self.assertIn("按供应商含税价格展示", main)
-        self.assertIn("取消", main)
+        for term in ("不能确认合规", "逐晚含税价格", "计价口径：待核实", "按供应商含税价格展示"):
+            self.assertIn(term, text)
+            self.assertNotIn(term, main)
+        self.assertEqual(text.count("请补充或核实：是否大陆因公出差"), 1)
         self.assertNotIn("供应商默认", main)
         self.assertNotIn("返回库存", main)
         self.assertNotIn("未预订、未付款、未审批", text)
@@ -101,8 +99,9 @@ class PlanPresentationTests(unittest.TestCase):
         for checks in ([], [{"status": "unverified", "reason": "policy_check_failed"}]):
             data = draft()
             data["policy_checks"] = checks
-            text = main_text(render_draft(data))
+            text = render_draft(data)
             self.assertIn("不能确认合规", text)
+            self.assertNotIn("不能确认合规", main_text(text))
             self.assertNotIn("已通过", text)
 
     def test_policy_details_do_not_hide_manual_review_or_known_limit(self):
@@ -112,8 +111,8 @@ class PlanPresentationTests(unittest.TestCase):
              "reason": "university_exception_conditions"},
             {"candidate_id": "internal-hotel", "status": "within_checked_rules",
              "reason": "university_lodging_cap", "cap": "400", "amount": "300", "currency": "CNY"}]
-        text = main_text(render_draft(data))
-        self.assertIn("人工核验", text)
+        text = render_draft(data)
+        self.assertIn("人工核验", main_text(text))
         self.assertIn("400 CNY", text)
         self.assertIn("不代表完整合规", text)
 

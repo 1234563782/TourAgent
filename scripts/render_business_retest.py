@@ -60,13 +60,13 @@ def render(records, reviews, run_date, evidence_paths, structured=False):
                      for event in turn["events"] for call in event["tool_calls"]]
             lines.extend(["", "模型调用轨迹（调用意图不等同于执行成功）：", "", "```json",
                           json.dumps(calls, ensure_ascii=False, indent=2), "```", "",
-                          "实际测试偏好：" + json.dumps(turn["memory"]["preferences"], ensure_ascii=False)])
+                          "已保存行程：" + json.dumps(turn["memory"].get("trip_history", []), ensure_ascii=False)])
     lines.extend([
         "", "## 剩余边界", "",
         "- 字段原话匹配是保守筛查，不是通用语义证明；复杂数字、否定和跨轮纠正仍需专门验证。",
         ("- 入口通过验证后由主图强制派发政策/规划；意图识别本身仍可能出错。天气工具结果由代码呈现，普通对话仍依赖模型。"
          if structured else "- 确定性呈现仅覆盖本轮实际调用的政策、规划和保存工具；尚无强制政策意图路由。"),
-        "- 偏好发起依赖模型调用工具；真正的写入仍必须收到确认中断的True。",
+        "- 长期偏好不再保存；已确认行程的写入仍必须收到确认中断的True。",
         "- 时间校验不推断缺失时刻，也未覆盖所有机场换乘、跨时区和入住营业规则。",
         "- 本报告的业务结论限于列出的固定案例；数据库与单元测试数字见本轮验收摘要，不以历史成功替代本次结果。",
         "", "## 证据", "",

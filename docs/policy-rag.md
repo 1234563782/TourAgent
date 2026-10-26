@@ -137,12 +137,16 @@ RRF 仍只是排名融合，不是模型精排。独立重排的供应商协议�
 | `TRAVEL_EMBEDDING_DIMENSIONS` | 该模型实际输出的向量维度 |
 | `TRAVEL_EMBEDDING_REVISION` | 默认 `1`，同名模型底层版本变化时更新 |
 | `TRAVEL_EMBEDDING_BATCH_SIZE` | 默认 `1`；确认供应商批量限制后可调大，程序支持1至64 |
+| `TRAVEL_POLICY_HNSW_M` | HNSW 图连接数，默认 `16`，范围4至100 |
+| `TRAVEL_POLICY_HNSW_EF_CONSTRUCTION` | 建索引候选宽度，默认 `128`，必须不小于 `M` |
+| `TRAVEL_POLICY_HNSW_EF_SEARCH` | 查询候选宽度，默认 `80`；文档过滤较多时可调大 |
 
 数据库须预先安装可用的 pgvector 扩展文件。`init-db` 可以执行 `CREATE EXTENSION`，
 但不会安装 PostgreSQL 服务或系统扩展包。连接串的用户名和密码须正确 URL 编码；
 生产连接由管理员配置 TLS 和最小权限。
 
-Embedding 请求不会发送 `dimensions` 参数，直接验证模型实际输出维度。
+兼容接口仅对支持该参数的模型发送 `dimensions`（当前为 `text-embedding-v3/v4`）；
+`qwen3.7-text-embedding` 使用服务端默认的1024维，并再次验证模型实际输出维度。
 当前仅支持兼容 JSON `/embeddings`、Bearer Key、HTTPS 的服务，禁止重定向，
 不自动继承代理，不自动切换供应商或重试鉴权失败。此项目没有选定或订购模型服务。
 
@@ -233,10 +237,20 @@ RRF 分数是排序依据，不是“回答正确概率”；仍需真实检索�
 更换分词词典、Embedding 基础地址/模型/维度/修订标识后需重新导入新版本，
 不能混用不兼容的向量。
 
-当前精确查询使用预过滤后的物化候选集，没有启用近似检索。
-`scripts/policy_hnsw_ddl.py --document-id <编号> --dimensions <维度>` 只输出可选索引 SQL，
-不会执行 SQL，也不会切换运行时搜索路径。它是后续性能实验入口，不是已验收优化。
-较高维度与 HNSW 参数、查询路径须另行评估，不能只建索引就假定当前精确查询会变快。
+向量召回默认使用全局 HNSW 余弦索引，查询保留 `document_id` 范围过滤，
+并在每次查询事务内设置 `hnsw.ef_search`。初始化数据库或导入政策草稿时会确保当前 Embedding
+维度对应的索引存在；已有数据库可显式执行：
+
+```powershell
+.\.venv\Scripts\python.exe scripts/policy_admin.py migrate-hnsw
+```
+
+也可以只生成 SQL 供管理员审核：
+`scripts/policy_hnsw_ddl.py --dimensions <维度> --m 16 --ef-construction 128`。
+索引缺失时查询会回退到原来的精确排序，`search(..., _include_rankings=True)` 会在
+`rankings.vector_search_mode` 标记为 `exact_fallback`；这用于迁移窗口和事故恢复，不应作为长期运行状态。
+由于近似索引先检索再应用文档过滤，多个政策文档共存时需要通过 `TRAVEL_POLICY_HNSW_EF_SEARCH`
+和真实库上的 `EXPLAIN (ANALYZE, BUFFERS)`、Recall@K、P95 延迟验证召回与性能。
 
 ## 表格与规则边界
 
@@ -297,6 +311,64 @@ RRF 分数是排序依据，不是“回答正确概率”；仍需真实检索�
 示例住宿事实应得到上限420元、已核验金额400元、`approved=false`。
 检索验收包含30个固定问题，要求指定条款均被找回且关联上下文未截断。
 它只评测来源召回，不证明真实模型回答正确。
+
+## Qwen API 重排
+
+仅接入 PostgreSQL 政策文字检索，不给机票、酒店推荐或确定性政策金额查询额外增加重排请求。
+流程为：向量/关键词各召回20条，RRF去重合并，最多40条交给重排API，保留前5条作为种子，
+再按原逻辑补齐精确住宿附表、适用范围和关联条款。原文、来源编号和版本绑定保持完整。
+
+在现有 `.env` 中添加 `TRAVEL_RERANK_API_KEY=你的Key`，默认即启用 `qwen3-rerank`。
+其余参数可选：
+
+```dotenv
+TRAVEL_POLICY_RERANK_MODE=qwen
+TRAVEL_RERANK_BASE_URL=https://maas.qianwenaiapi.com/api/v1
+TRAVEL_RERANK_MODEL=qwen3-rerank
+TRAVEL_RERANK_TIMEOUT=8
+TRAVEL_RERANK_CANDIDATES=40
+```
+
+地址采用用户提供的控制台示例，原生北京统一地址也可配置为
+`https://dashscope.aliyuncs.com/api/v1`；使用与该服务/地域匹配的Key。
+如需使用控制台示例中的另一模型，设 `TRAVEL_RERANK_MODEL=qwen3.7-text-rerank`。
+这里是原生API地址，不能填写聊天接口 `/compatible-mode/v1` 或完整排序端点。
+
+HTTP协议：`POST {BASE_URL}/services/rerank/text-rerank/text-rerank`，Bearer认证；
+请求使用 `input.query/documents` 和 `parameters.top_n/return_documents`，
+读取 `output.results[].index/relevance_score`，按输入索引还原政策片段，记录 `usage.total_tokens`。
+使用原文全文、不静默截断；若供应商拒绝超长输入，按失败回退，不丢弃证据后继续判断。
+不配置分数阈值，相关性分数不当作政策合规概率。
+
+Key/地址缺失、超时、网络错误、HTTP失败或索引/分数异常均使用原RRF前5条，不重试接口。
+显式 `TRAVEL_POLICY_RERANK_MODE=rrf` 可关闭请求。缺少已发布政策或Embedding仍遵循原有错误处理，
+不能用重排替代召回。Key未填写时不请求API，完整配置且发生请求后计入现有模型调用预算。
+无需重新导入政策或生成Embedding；更新配置后重启现有服务并发起新查询。
+
+启用Langfuse时，`policy_retrieve` 下可见 `policy_rerank`，默认只上传安全元数据：
+候选数量、耗时、固定错误码、模型摘要和供应商Token总数。
+候选ID、分数和模型名等详细负载遵循已有内容采集开关及脱敏；默认不上传问题和政策原文。
+本地评测的 `rankings.rerank` 同样保留实际重排状态、候选ID、入选ID、分数、Token数和耗时。
+
+对照实验使用同一份经人工确认的gold测试集和同一已发布资料，不使用旧 `--mode baseline`
+比较本次重排（该模式还会移除生产上下文补齐）。请分别运行生产流程的两个排序模式：
+
+```powershell
+$env:PYTHONPATH='.;tests'
+.\.venv\Scripts\python.exe -m evals.rag_retrieval_eval run --mode production --rerank-mode rrf --cases evals/rag_retrieval_gold_reviewed.jsonl
+.\.venv\Scripts\python.exe -m evals.rag_retrieval_eval run --mode production --rerank-mode qwen --cases evals/rag_retrieval_gold_reviewed.jsonl
+```
+
+`--cases` 应指向实际人工审核的测试集路径。真实评测会调用Embedding和重排服务并产生费用，
+本次未执行。结果分别保存为 `.verification/rag-retrieval-production-rrf*` 和
+`.verification/rag-retrieval-production-qwen*`，避免覆盖对照结果。
+比较 `selected_ids_recall_at_1/3/5`、`selected_ids_mrr`、`context_target_coverage`、
+`retrieval_p50_ms`、`rerank_success_cases`、`rerank_fallback_cases` 及逐请求费用。
+旧 `rrf_ids` 保留原RRF结果，不能把它当作重排结果。检索指标不等同于最终回答正确率；
+回答引用质量、端到端耗时和总费用仍需单独实验。
+
+接口参考：https://help.aliyun.com/zh/model-studio/text-rerank-api
+地域/统一域名参考：https://help.aliyun.com/zh/model-studio/base-url
 
 ## 权限与隐私
 

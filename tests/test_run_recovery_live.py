@@ -121,14 +121,11 @@ class RunRecoveryLiveTests(unittest.TestCase):
         setup_chat_runs(self.settings)
         self.assertEqual(self.recover(review).json(), first.json())
 
-    def test_changed_preferences_or_new_trip_invalidates_review(self):
+    def test_new_trip_invalidates_review(self):
         self.fail_run()
         review = self.review()
+        self.assertNotIn("preferences", review)
         memory = PostgresTravelMemory(self.settings, self.identity)
-        memory.save_preferences([{"type": "座位", "value": "靠窗"}])
-        self.assertEqual(self.recover(review).status_code, 409)
-        review = self.review()
-        self.assertTrue(review["preferences"]["items"])
         memory.save_trip({"id": uuid4().hex, "note": "another conversation"})
         self.assertEqual(self.recover(review).status_code, 409)
         self.assertEqual(self.recover(self.review()).status_code, 200)
@@ -282,7 +279,7 @@ class RunRecoveryLiveTests(unittest.TestCase):
             graph = build(saver)
             saved = graph.update_state(config, {
                 "messages": [HumanMessage("保留原文"), AIMessage("完成")], "slots": slots,
-                "tasks": {}, "draft": {"id": "old"}, "preference_pending": {"consent": True},
+                "tasks": {}, "draft": {"id": "old"},
                 "pending_turns": [{"user_message": 0}], "task_queue": ["old"],
             }, as_node="finish")
         run_id = uuid4().hex

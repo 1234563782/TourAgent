@@ -90,8 +90,8 @@ def render(records, reviews, retrieval_cases):
             else:
                 lines.append("本轮没有工具调用。")
             lines.append("")
-            lines.append("测试记忆中的偏好：" + json.dumps(
-                turn["memory"]["preferences"], ensure_ascii=False) + "。")
+            lines.append("已保存行程：" + json.dumps(
+                turn["memory"].get("trip_history", []), ensure_ascii=False) + "。")
     lines.extend(["", "## 5. 30题检索覆盖明细", "",
                   "这部分只执行检索，不请求模型生成回答；因此“回答”均为不适用。每题所列条款均命中，"
                   "未发现上下文截断。最终回答质量由上面的真实对话案例另行评估。", "",
@@ -100,8 +100,7 @@ def render(records, reviews, retrieval_cases):
         lines.append(f"| {index} | {case['question']} | {', '.join(case['clauses'])} | 命中 |")
     lines.extend([
         "", "## 6. 问题处理优先级与未验收范围", "",
-        "1. 优先修复偏好工具的模型可见参数契约。当前list[dict]未表达type/value必填结构，"
-        "真实模型多种猜测均被invalid_preferences拒绝，确认流程无法触达。",
+        "1. 长期偏好工具已移除；保存能力仅验证已确认行程，不再验收偏好写入。",
         "2. 补强主助手数字核验及事实转交约束：费用变化必须重新核验；明确提供的出差天数不能遗漏；"
         "未确认的币种、计价和核验状态不得自行补全。",
         "3. 为子图异常补充脱敏可观测性。本轮只有通用Tool failed，不能断言是模型、网络、地图或规则错误；"

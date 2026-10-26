@@ -18,7 +18,8 @@ from tests.test_slot_protocol import RawModel, reply
 class TaskOperationTests(unittest.TestCase):
     def setUp(self):
         self.subject = {"id": "subject-a", "revision": 3, "domain": "expense",
-                        "intent": "policy_explain", "values": {"destination": "甲"},
+                        "intent": "policy_explain", "values": {"kind": "hotel", "destination": "甲"},
+                        "policy_query": {"category": "hotel", "mode": "personal_limit"},
                         "history": [], "evidence": {}, "result": {"status": "old"},
                         "fact_confirmation": {"revision": 3}, "validation": "context_reviewed"}
         self.current = {"expense": self.subject, "subjects": {"subject-a": self.subject}}
@@ -77,6 +78,53 @@ class TaskOperationTests(unittest.TestCase):
         self.assertEqual(tasks[self.task["id"]]["revision"], 4)
         self.assertIsNone(tasks[self.task["id"]]["result_ref"])
         self.assertNotIn("fact_confirmation", result["slots"]["expense"])
+
+    def test_followup_inherits_policy_scope_and_canonical_goal_when_omitted(self):
+        args = {**self.update, "expense": {"destination": "北京"}, "question": ""}
+        args["evidence"] = {"destination": {"user_message": 0, "quote": "北京"}}
+        args.pop("policy_query")
+        result = self.extract(args, text="北京")
+        self.assertEqual(result["status"], "ok")
+        record = result["tasks"][0]
+        self.assertEqual(record["question"], self.task["question"])
+        self.assertEqual(result["slots"]["expense"]["policy_query"],
+                         self.subject["policy_query"])
+
+    def test_fact_update_cannot_replace_canonical_goal_with_short_patch(self):
+        args = {**self.update, "expense": {"destination": "北京"}, "question": "目的地北京"}
+        args["evidence"] = {"destination": {"user_message": 0, "quote": "北京"}}
+        args.pop("policy_query")
+        result = self.extract(args, text="北京")
+        self.assertEqual(result["status"], "ok")
+        tasks, _ = reconcile_tasks({self.task["id"]: self.task}, result["tasks"], result["slots"])
+        self.assertEqual(tasks[self.task["id"]]["question"], "目的地北京")
+        self.assertEqual(tasks[self.task["id"]]["canonical_question"], self.task["question"])
+
+    def test_explicit_policy_scope_change_uses_new_canonical_goal(self):
+        result = self.extract()
+        self.assertEqual(result["status"], "ok")
+        tasks, _ = reconcile_tasks({self.task["id"]: self.task}, result["tasks"], result["slots"])
+        self.assertEqual(tasks[self.task["id"]]["question"], "解释乙的标准")
+        self.assertEqual(tasks[self.task["id"]]["canonical_question"], "解释乙的标准")
+
+    def test_policy_scope_expansion_preserves_confirmed_destination(self):
+        args = {**self.update, "expense": {}, "evidence": {},
+                "policy_query": {"category": "hotel", "mode": "personal_limit",
+                                 "coverage": "all_regions"},
+                "question": "所有地区的住宿标准都列举一下"}
+        result = self.extract(args, text="所有地区的住宿标准都列举一下")
+        self.assertEqual(result["status"], "ok")
+        subject = result["slots"]["expense"]
+        self.assertEqual(subject["values"]["destination"], "甲")
+        self.assertEqual(subject["policy_query"]["coverage"], "all_regions")
+        self.assertEqual(subject["policy_query"]["mode"], "personal_limit")
+
+    def test_policy_scope_change_uses_current_request_when_question_is_omitted(self):
+        args = {**self.update, "expense": {}, "evidence": {}, "question": ""}
+        result = self.extract(args, text="改成综合政策说明")
+        self.assertEqual(result["status"], "ok")
+        tasks, _ = reconcile_tasks({self.task["id"]: self.task}, result["tasks"], result["slots"])
+        self.assertEqual(tasks[self.task["id"]]["canonical_question"], "改成综合政策说明")
 
     def test_failed_committed_task_update_does_not_become_pending_turn_recovery(self):
         task = {**self.task, "status": "failed"}

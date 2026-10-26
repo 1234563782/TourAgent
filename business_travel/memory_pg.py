@@ -9,7 +9,6 @@ from psycopg.types.json import Jsonb
 from langgraph.checkpoint.postgres import PostgresSaver
 
 from .memory import validate_id
-from .preferences import PreferenceMutation, mutate, preference_values, snapshot
 from .db_pool import pooled_connection
 
 
@@ -54,15 +53,8 @@ def setup_memory(settings):
         connection.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(
             sql.Identifier(settings.memory_schema)))
         with connection.transaction():
-            connection.execute("""
-                CREATE TABLE IF NOT EXISTS user_preferences (
-                    company_id TEXT NOT NULL,
-                    user_id TEXT NOT NULL,
-                    data JSONB NOT NULL CHECK (jsonb_typeof(data) IN ('array', 'object')),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    PRIMARY KEY (company_id, user_id)
-                )
-            """)
+            # Explicit init only. Drops the retired preference table and does not recreate it.
+            connection.execute("DROP TABLE IF EXISTS user_preferences")
             connection.execute("""
                 CREATE TABLE IF NOT EXISTS trips (
                     company_id TEXT NOT NULL,
@@ -112,49 +104,11 @@ class PostgresTravelMemory:
 
     def read(self) -> dict:
         with memory_connection(self.settings) as connection, connection.transaction():
-            row = connection.execute(
-                "SELECT data FROM user_preferences WHERE company_id=%s AND user_id=%s", self._scope,
-            ).fetchone()
             trips = connection.execute(
                 "SELECT data FROM trips WHERE company_id=%s AND user_id=%s "
                 "ORDER BY sequence DESC LIMIT %s", (*self._scope, self.settings.memory_history_limit),
             ).fetchall()
-        return {"preferences": preference_values(row["data"]) if row else [],
-                "trip_history": [row["data"] for row in trips]}
-
-    def preference_snapshot(self):
-        with memory_connection(self.settings) as connection:
-            row = connection.execute(
-                "SELECT data FROM user_preferences WHERE company_id=%s AND user_id=%s", self._scope,
-            ).fetchone()
-        return snapshot(row["data"] if row else [])
-
-    def mutate_preferences(self, mutation: PreferenceMutation, source: dict):
-        with memory_connection(self.settings) as connection, connection.transaction():
-            connection.execute(
-                "INSERT INTO user_preferences(company_id,user_id,data) VALUES(%s,%s,%s) "
-                "ON CONFLICT(company_id,user_id) DO NOTHING", (*self._scope, Jsonb([])),
-            )
-            row = connection.execute(
-                "SELECT data FROM user_preferences WHERE company_id=%s AND user_id=%s FOR UPDATE",
-                self._scope,
-            ).fetchone()
-            updated = mutate(row["data"], mutation, source)
-            connection.execute(
-                "UPDATE user_preferences SET data=%s,updated_at=now() WHERE company_id=%s AND user_id=%s",
-                (Jsonb(updated), *self._scope),
-            )
-        return snapshot(updated)
-
-    def save_preferences(self, preferences: list[dict]):
-        if not isinstance(preferences, list) or any(not isinstance(item, dict) for item in preferences):
-            raise ValueError("Preferences must be a list of objects")
-        with memory_connection(self.settings) as connection:
-            connection.execute(
-                "INSERT INTO user_preferences(company_id,user_id,data) VALUES(%s,%s,%s) "
-                "ON CONFLICT(company_id,user_id) DO UPDATE SET data=excluded.data,updated_at=now()",
-                (*self._scope, Jsonb(preferences)),
-            )
+        return {"trip_history": [row["data"] for row in trips]}
 
     def save_trip(self, draft: dict):
         if not isinstance(draft, dict) or not isinstance(draft.get("id"), str) or not draft["id"]:

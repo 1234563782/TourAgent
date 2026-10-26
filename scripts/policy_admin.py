@@ -32,7 +32,8 @@ def parser():
     package.add_argument("--company", required=True)
     package.add_argument("--output", type=Path, required=True)
     sub.add_parser("check-config", help="仅显示缺失配置键名，不联网")
-    sub.add_parser("init-db", help="显式创建 vector 扩展及政策表，需要数据库 DDL 权限")
+    sub.add_parser("init-db", help="显式创建 vector 扩展、政策表及 HNSW 索引，需要数据库 DDL 权限")
+    sub.add_parser("migrate-hnsw", help="为已有 policy_chunks 表创建配置的 HNSW 索引，需要数据库 DDL 权限")
     stage = sub.add_parser("stage", help="发送正文给配置的 Embedding 服务，并写入数据库草稿")
     stage.add_argument("--bundle", type=Path, required=True)
     publish = sub.add_parser("publish", help="确认核对后发布数据库中的草稿")
@@ -87,6 +88,8 @@ def main(argv=None):
             store = PostgresPolicyStore(settings)
             if args.command == "init-db":
                 output = store.initialize()
+            elif args.command == "migrate-hnsw":
+                output = store.migrate_hnsw()
             elif args.command == "stage":
                 output = store.stage(PolicyBundle.model_validate_json(args.bundle.read_text(encoding="utf-8")))
             elif args.command == "publish":

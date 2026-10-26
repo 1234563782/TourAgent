@@ -9,7 +9,6 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 
 from .chat_runs import REVIEW_STATUSES, public_run
 from .memory_pg import ScopedPostgresSaver, memory_connection
-from .preferences import snapshot
 
 
 class RecoveryConflict(Exception):
@@ -73,20 +72,16 @@ def _review(connection, identity, conversation_id, graph):
                 or state.next or state.interrupts or any(task.error for task in state.tasks)):
             raise RecoveryUnavailable("完整检查点不可用，不能安全继承，请保留原会话并联系管理员")
         values = state.values
-    preference_row = connection.execute(
-        "SELECT data FROM user_preferences WHERE company_id=%s AND user_id=%s", scope[:2]).fetchone()
-    preferences = snapshot(preference_row["data"] if preference_row else [])
     trips = connection.execute(
         "SELECT draft_id,data,saved_at FROM trips WHERE company_id=%s AND user_id=%s "
         "AND saved_at >= %s ORDER BY sequence", (*scope[:2], run["created_at"])).fetchall()
     review = {
         "run": public_run(run), "source_checkpoint_id": checkpoint_id,
-        "preferences": preferences,
         "saved_trips": [{"id": row["draft_id"], "data": row["data"],
                          "saved_at": row["saved_at"].isoformat()} for row in trips],
         "review_since": run["created_at"].isoformat(),
         "history_message_count": len(values.get("messages", [])),
-        "notice": "失败执行结果尚未确认。以下是当前长期偏好及本次请求开始后已保存的行程草案，"
+        "notice": "失败执行结果尚未确认。以下是本次请求开始后已保存的行程草案，"
                   "可能包含其他会话的写入，不代表订单或预订成功。分叉仅继承最近完整完成的对话，"
                   "不继承失败轮和待确认操作；已保存的个人记录不会撤销，也不会重试原请求。",
         "recovery": None,

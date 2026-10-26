@@ -606,7 +606,7 @@ class GraphExplanationTests(unittest.TestCase):
                     subject = output["slots"]["subjects"][task["subject_id"]]
                     self.assertEqual(task["result_ref"]["revision"], subject["revision"])
                     self.assertEqual(subject["result"]["revision"], subject["revision"])
-                    self.assertEqual(policy.search.call_args.args[0], task_question)
+                    self.assertEqual(policy.search.call_args.args[0], task["canonical_question"])
                     if index >= 2:
                         self.assertEqual(subject["values"]["employee_grade"], "普通员工")
                     if index >= 3:
@@ -620,12 +620,13 @@ class GraphExplanationTests(unittest.TestCase):
             self.assertTrue(all(len(c.args) == 1 for c in policy.search.call_args_list))
             payload = json.loads(models["policy"].messages[-1][-1].content)
             self.assertEqual(payload["user_request"], turns[-1][0])
-            self.assertEqual(payload["question"], turns[-1][2])
+            self.assertEqual(payload["question"], output["tasks"][original_id]["canonical_question"])
             self.assertEqual(payload["facts"]["destination"], "测试乙地")
             self.assertEqual(payload["facts"]["employee_grade"], "普通员工")
             self.assertEqual(payload["request_context"]["original_request"], turns[0][0])
             self.assertEqual(payload["request_context"]["task_id"], original_id)
-            self.assertEqual(payload["request_context"]["scoped_request"], turns[-1][2])
+            self.assertEqual(payload["request_context"]["scoped_request"],
+                             output["tasks"][original_id]["canonical_question"])
             self.assertEqual(payload["request_context"]["revision"], len(turns))
             self.assertEqual(payload["request_context"]["current_changes"], [{
                 "field": "expense_date", "before": "2026-09-01", "after": "2026-09-14",

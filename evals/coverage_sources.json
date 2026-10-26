@@ -32,7 +32,7 @@
       "environment": "isolated_postgres",
       "methods": [
         "test_saved_effect_review_and_repeated_confirmation_never_write_again",
-        "test_changed_preferences_or_new_trip_invalidates_review",
+        "test_new_trip_invalidates_review",
         "test_completed_checkpoint_without_ledger_commit_is_not_promoted",
         "test_checkpoint_write_failure_rolls_back_registry_checkpoint_and_receipt",
         "test_concurrent_confirmation_creates_only_one_child",
@@ -57,9 +57,9 @@
       "environment": "isolated_postgres",
       "methods": [
         "test_pending_tasks_survive_postgres_reopen_and_are_thread_scoped",
-        "test_preferences_survive_reconstruction_and_are_company_user_scoped",
-        "test_mutation_batch_rolls_back_and_other_identity_cannot_target_record",
-        "test_concurrent_updates_have_one_winner"
+        "test_trips_are_idempotent_ordered_bounded_and_conflicts_preserve_original",
+        "test_setup_is_repeatable_and_preserves_trips",
+        "test_migration_is_repeatable_without_overwriting_new_trips"
       ]
     },
     {
@@ -67,9 +67,7 @@
       "path": "tests/test_preference_autosave.py",
       "environment": "offline",
       "methods": [
-        "test_temporary_other_person_and_hypothetical_are_rejected",
-        "test_version_conflict_does_not_overwrite_concurrent_change",
-        "test_delete_is_reviewed_against_current_request"
+        "test_assistant_source_has_no_preference_tools"
       ]
     },
     {
@@ -130,18 +128,10 @@
     {
       "id": "gap-memory-scope",
       "category": "memory_revision",
-      "conversation": ["我平时坐高铁喜欢靠窗。", "这次替同事订，他喜欢靠过道。", "下次我出差仍按我的习惯。"],
-      "expected_contract": ["仅本人长期偏好可持久化", "同事和本次偏好不覆盖本人长期偏好"],
-      "basis_method": "test_temporary_other_person_and_hypothetical_are_rejected",
-      "required_setup": "隔离身份、空偏好；观察真实模型提出的记忆变更与最终持久化状态"
-    },
-    {
-      "id": "gap-memory-delete",
-      "category": "memory_revision",
-      "conversation": ["我以后坐飞机喜欢靠窗。", "忘掉我刚才说的座位偏好。"],
-      "expected_contract": ["删除对应偏好", "新会话不再注入已删除偏好"],
-      "basis_method": "test_delete_is_reviewed_against_current_request",
-      "required_setup": "隔离身份；核对首次保存、删除及新会话读取，不能只看回复"
+      "conversation": ["我平时坐高铁喜欢靠窗。", "请记住，以后都按这个来。"],
+      "expected_contract": ["不写入长期偏好", "不声称已经记住"],
+      "basis_method": "test_assistant_source_has_no_preference_tools",
+      "required_setup": "隔离身份；确认没有偏好工具，回复也不能声称已保存长期偏好"
     },
     {
       "id": "gap-stale-result",

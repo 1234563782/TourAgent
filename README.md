@@ -12,6 +12,11 @@
 
 ## 架构
 
+JEV 的基础用法、单意图到多意图的演进、任务路由和验证边界，见
+[JEV 接入原理与多意图改造详解](docs/JEV接入原理与多意图改造详解.md)。
+任务准备阶段、字段完整性门禁与语义复核职责边界，见
+[任务准备架构与提交前字段校验](docs/任务准备架构与提交前字段校验.md)。
+
 ```text
 用户
   -> TurnRoute（操作、目标事项、控制/恢复授权）
@@ -21,8 +26,8 @@
   -> LangGraph 主图按意图派发
        -> 规划工作流：交通与酒店查询 -> PlanSelection -> 时间 / 政策 / 地图核验
        -> 政策工作流：政策混合检索或确定性规则校验（不再次用模型提取事实）
-       -> 普通主助手：记忆查询 / 天气 / 长期偏好自动保存 / 行程草案保存确认
-  -> 业务结果确定性呈现；偏好经内容复核自动保存，行程草案保存仍需人工确认
+       -> 普通主助手：记忆查询 / 天气 / 行程草案保存确认
+  -> 业务结果确定性呈现；行程草案保存仍需人工确认。不保存长期偏好
 ```
 
 查询能力不是独立 Agent；政策解释使用检索、模型提案与独立复核，结构化费用核验不依赖模型计算。
@@ -73,6 +78,10 @@ py -3.12 -m venv .venv
 | `TRAVEL_POLICY_DOCS_DIR` | 旧本地文本模式的政策目录 |
 | `TRAVEL_POLICY_KEY` | 当前政策键；高校资料包使用 `hfut_travel` |
 | `TRAVEL_POLICY_RAG_MAX_ANSWER_ATTEMPTS` | 每次检索证据下的回答尝试数，默认2，范围1-3；供应商故障不重试 |
+| `TRAVEL_RERANK_API_KEY` | 政策语义重排 Key；默认 `qwen3-rerank`，填入后启用，未填继续使用 RRF |
+| `TRAVEL_POLICY_RERANK_MODE` | `qwen` 使用 API 重排；`rrf` 保留旧排序用于对照实验 |
+| `TRAVEL_POLICY_HNSW_M` / `TRAVEL_POLICY_HNSW_EF_CONSTRUCTION` / `TRAVEL_POLICY_HNSW_EF_SEARCH` | pgvector HNSW 图和查询参数，默认 `16` / `128` / `80` |
+| `policy_admin.py migrate-hnsw` | 为已有政策数据库创建当前 Embedding 维度对应的 HNSW 索引 |
 | `AMAP_API_KEY` | 高德地图密钥，可选 |
 | `TRAVEL_MEMORY_DATABASE_URL` | PostgreSQL 记忆连接串；留空复用政策数据库 |
 | `TRAVEL_MEMORY_COMPANY_ID` | 组织标识（沿用字段名）；留空复用政策组织，须与政策组织一致 |
@@ -94,6 +103,7 @@ py -3.12 -m venv .venv
 途牛远程接入与授权边界见 [途牛配置说明](docs/tuniu-mcp.md)。
 飞猪备选配置、政策格式和完整限制见 [运行说明](docs/langgraph-migration.md)。
 Word 导入、PostgreSQL/pgvector、Embedding 配置与发布流程见 [政策接入说明](docs/policy-rag.md)。
+Qwen 重排的接口配置、回退与对照实验也见该说明的“Qwen API 重排”一节。
 学校正文和住宿附表的归档、资料包导入、适用规则及限制见 [高校政策接入](docs/高校政策接入.md)。
 原有 `.env` 不会被覆盖；新政策配置键请参照 `.env.example` 添加。
 记忆存储、旧 SQLite 导入与身份边界见 [PostgreSQL 记忆说明](docs/memory-postgres.md)。
@@ -104,7 +114,6 @@ Word 导入、PostgreSQL/pgvector、Embedding 配置与发布流程见 [政策�
 | 命令 | 用途 |
 | --- | --- |
 | `/history` | 查看已保存的历史行程 |
-| `/preferences` | 查看偏好 |
 | `/resume` | 恢复未完成操作或待确认记录 |
 | `/clear` | 开始新会话，不删除历史记录 |
 | `/exit` | 退出 |
@@ -135,7 +144,7 @@ TourAgent/
     providers.py            飞猪、天气和地图适配器
     tuniu.py                途牛官方远程 MCP 只读查询适配器
     memory.py               记忆接口及离线 SQLite 兼容适配器
-    memory_pg.py            PostgreSQL 偏好/行程与身份绑定检查点
+    memory_pg.py            PostgreSQL 行程与身份绑定检查点
     memory_migration.py     只读旧数据导入、事务及逐条核验
     policy.py               政策后端选择与本地文本兼容
     policy_documents.py     Word 条款、表格与版本化导入包

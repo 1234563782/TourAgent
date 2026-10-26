@@ -6,7 +6,7 @@ from pydantic import Field
 
 from .contracts import Contract
 from .result_labels import KIND_LABELS, policy_reason_label
-from .presentation import detail_block
+from .presentation import detail_block, table_row
 
 
 class FactEvidence(Contract):
@@ -18,7 +18,7 @@ class FactEvidence(Contract):
 FIELD_LABELS = {
     "personnel_type": "人员身份", "academic_title": "职称", "technical_grade": "专业技术岗位等级",
     "management_grade": "管理岗位等级", "transport_standard": "适用交通类别",
-    "lodging_standard": "住宿附表人员档次", "destination_province": "目的地所属省级地区",
+    "lodging_standard": "住宿人员档次", "destination_province": "目的地所属省级地区",
     "trip_context": "出差场景", "student_activity_eligible": "是否属于规定的学生活动",
     "organizer_provides_meals": "会议或培训是否统一供餐", "in_transit_day": "是否在途日期",
     "local_transport_method": "市内交通选择包干还是凭据", "paid_by_other_organization": "校外单位是否承担市内交通",
@@ -30,9 +30,11 @@ FIELD_LABELS = {
     "purpose": "出差目的", "meeting_address": "办事地址", "transport": "交通方式",
     "train_service": "列车类型", "budget": "预算", "room_occupants": "入住人数",
     "hotel_rooms": "酒店房间总数", "hotel_adults": "成人总人数", "hotel_child_ages": "儿童年龄列表",
-    "expense_date": "费用发生日期", "destination": "目的地", "employee_grade": "职级",
+    "expense_date": "费用发生日期", "expense_end": "费用区间结束日期",
+    "in_transit_dates": "在途日期", "destination": "目的地", "employee_grade": "职级",
     "mainland_business_trip": "是否大陆因公出差", "long_assignment_days": "本次出差或连续驻场总天数",
     "special_approval": "是否有专项审批", "amount": "实际金额", "currency": "币种",
+    "basis": "住宿计价口径（每人每天或每间每晚）",
     "basis": "计价单位", "taxes_confirmed": "是否含税", "date_verified": "日期是否已核实",
     "occupants": "入住人数", "roommate_grade": "同住人职级", "voluntary_twin_share": "是否双方自愿合住",
     "transport_mode": "交通方式", "seat_class": "席别", "suitable_direct_train_hours": "适用直达高铁时长",
@@ -40,6 +42,9 @@ FIELD_LABELS = {
     "covered_meals": "免费提供的餐次", "local_business_travel": "是否有市内公务出行",
     "local_transport_coverage": "接送覆盖范围", "self_paid_local_travel": "是否自行承担市内公务交通",
     "local_car_cost_reimbursed": "是否另报私车费用",
+    "expense_scenario": "实际或假设费用", "amount_scope": "单晚、每晚同价或整段总额",
+    "nightly_amounts": "逐晚金额和日期", "transport_amount_scope": "票面费用或含附加费总额",
+    "fare_amount": "票面费用",
 }
 
 
@@ -51,8 +56,11 @@ def render_fact_context(context, *, compact=False):
         "query_scope": {"hotel": "仅酒店", "transport": "仅交通", "combined": "交通和酒店"},
         "journey": {"one_way": "单程", "round_trip": "往返"},
         "covered_meals": {"breakfast": "早餐", "lunch": "午餐", "dinner": "晚餐"},
-        "kind": {"hotel": "住宿", "meal": "餐补", "transport": "交通"},
+        "kind": {"hotel": "住宿", "meal": "餐补", "transport": "交通", "local_transport": "市内交通"},
         "basis": {"room_night": "每间每晚", "person_day": "每人每天"},
+        "expense_scenario": {"actual": "实际发生", "hypothetical": "假设测算"},
+        "amount_scope": {"single": "单晚或单张票", "uniform_nightly": "明确每晚同价", "stay_total": "住宿总额"},
+        "transport_amount_scope": {"fare_only": "仅票面费用", "total": "含其他费用总额", "unknown": "待确认"},
         "personnel_type": {"staff": "教职工", "student": "学生", "invited": "受邀人员"},
         "trip_context": {"ordinary": "普通出差", "conference": "会议", "training": "培训", "research": "科研",
                          "fieldwork": "野外作业", "self_drive": "自驾", "rental": "租车", "noon_rest": "午休房"},
@@ -74,7 +82,13 @@ def render_fact_context(context, *, compact=False):
     lines = ["按你提供的信息整理：" if compact else
              "我识别到的信息（根据你当前的表述整理，不代表业务系统已核实，也不代表学校系统已核实）："]
     for name, record in fields.items():
-        lines.append(f"- {FIELD_LABELS.get(name, name)}：{display(record.get('value'), name)}")
+        if name == "lodging_standard":
+            # Never surface a lodging grade the user did not ask about.
+            continue
+        label = FIELD_LABELS.get(name, name)
+        if name == "amount" and fields.get("expense_scenario", {}).get("value") == "hypothetical":
+            label = "假设金额"
+        lines.append(f"- {label}：{display(record.get('value'), name)}")
     lines.append("如需修改行程信息，直接告诉我即可。" if compact else
                  "我会按以上信息继续查询或核对；如果有任何信息需要修改，直接告诉我即可。")
     return "\n".join(lines)
@@ -89,8 +103,8 @@ def source_labels(sources):
 
 
 def _public_source_label(source):
-    return " / ".join(str(source.get(key) or "") for key in
-                      ("source", "version", "clause", "section", "sheet", "cell_range")).strip(" /")
+    return " / ".join(str(source[key]) for key in
+                      ("source", "version", "clause", "section", "sheet", "cell_range") if source.get(key))
 
 
 def _public_source_refs(used_ids):
@@ -115,30 +129,103 @@ def _policy_failure_message(diagnostic):
 
 
 def render_policy(data):
+    if data.get("check_mode") == "estimate" and any(
+            isinstance(check.get("result", {}).get("estimate"), dict) for check in data.get("rule_checks", [])):
+        from .reimbursement_view import render_estimates
+        return render_estimates(data, FIELD_LABELS, render_fact_context)
     lines = ["政策核对结果（不是审批或报销批准）："]
     rag = data.get("rag")
     if data.get("purpose") == "explain" and isinstance(rag, dict):
         status = rag.get("status")
         if status in {"answered", "partial"}:
+            lodging_table = data.get("lodging_table")
+            if status == "answered" and isinstance(lodging_table, dict):
+                rows = lodging_table.get("rows", [])
+                standard = lodging_table.get("standard")
+                grades = lodging_table.get("grades") or []
+                source_refs = _public_source_refs(
+                    [row.get("source_ref") for row in rows if row.get("source_ref")])
+                lines = ["### 政策解答"]
+                if standard:
+                    lines.append(f"按已确定的住宿人员档次“{standard}”列出住宿费标准；已确认的身份和目的地事实仍保留，本次只扩大回答范围。")
+                    header = ["地区", "适用地区", "平季标准", "旺季标准/期间"]
+                    body = []
+                    for row in rows:
+                        seasonal = ""
+                        if row.get("seasonal_cap"):
+                            seasonal = f"{row['seasonal_cap']}（{row.get('season_text') or '旺季'}）"
+                        ref = source_refs.get(row.get("source_ref"), "")
+                        body.append(table_row([
+                            row.get("region", ""), "、".join(row.get("localities") or []),
+                            row.get("ordinary_cap", ""), seasonal + (f" [{ref}]" if ref else "")
+                        ]))
+                    lines.extend([f"单位：{lodging_table.get('currency', 'CNY')} / 人·天。",
+                                  table_row(header), table_row(["---"] * len(header)), *body])
+                else:
+                    header = ["地区", "适用地区", *grades]
+                    body = []
+                    for row in rows:
+                        ref = source_refs.get(row.get("source_ref"), "")
+                        values = [row.get("region", ""), "、".join(row.get("localities") or [])]
+                        values.extend((row.get("caps") or {}).get(grade, "") for grade in grades)
+                        if ref:
+                            values[-1] = f"{values[-1]} [{ref}]"
+                        body.append(table_row(values))
+                    lines.extend([f"单位：{lodging_table.get('currency', 'CNY')} / 人·天。",
+                                  table_row(header), table_row(["---"] * len(header)), *body])
+                lines.append("\n以上为政策解释，不是审批或报销批准。")
+                evidence = []
+                source_by_ref = {source.get("source_id"): source for source in data.get("sources", [])}
+                for source_id, label in source_refs.items():
+                    source = source_by_ref.get(source_id)
+                    if not source:
+                        continue
+                    source_label = ("配置摘录（项目已审核配置，非制度原文）"
+                                    if source.get("source_type") == "reviewed_rule" else "原文摘录")
+                    evidence.append(f"[{label}] {_public_source_label(source)}\n\n{source_label}：\n{source.get('text', '')}")
+                if evidence:
+                    lines.append("\n" + detail_block("政策依据", "\n\n".join(evidence)))
+                return "\n".join(lines)
             proposal = rag["proposal"]
             lines = ["### 政策解答"]
-            used = []
+            sources = {source["source_id"]: source for source in data["sources"]}
+            claims, excerpts = [], {}
             for claim in proposal["claims"]:
-                ids = list(dict.fromkeys(citation["source_id"] for citation in claim["citations"]))
-                used.extend(ids)
-            public_refs = _public_source_refs(used)
-            lines.extend("\n" + claim["text"] for claim in proposal["claims"])
+                cited = []
+                for citation in claim.get("citations", []):
+                    source = sources.get(citation.get("source_id"))
+                    quote = citation.get("quote")
+                    if quote is None and source:
+                        quote = source.get("text")
+                    if (not source or not isinstance(quote, str) or not quote.strip()
+                            or quote not in source.get("text", "")):
+                        break
+                    cited.append((citation["source_id"], quote))
+                else:
+                    if cited:
+                        claims.append((claim["text"], list(dict.fromkeys(ident for ident, _ in cited))))
+                        for ident, quote in cited:
+                            excerpts.setdefault(ident, [])
+                            if quote not in excerpts[ident]:
+                                excerpts[ident].append(quote)
+            if not claims:
+                return "政策依据不完整，暂不能展示可靠结论，请重新查询。"
+            public_refs = _public_source_refs(excerpts)
+            for text, ids in claims:
+                lines.append("\n" + text + " " + " ".join(f"[{public_refs[ident]}]" for ident in ids))
             if status == "partial":
                 lines.append("\n### 还需核实")
                 for item in proposal["limitations"]:
                     lines.append(f"\n{item['topic']}：{item['detail']}\n{item['next_step']}")
-            sources = {source["source_id"]: source for source in data["sources"]}
-            references = []
-            for ident in dict.fromkeys(used):
-                source = sources[ident]
-                references.append(f"[{public_refs[ident]}] {_public_source_label(source)}")
             lines.append("\n以上为政策解释，不是审批或报销批准。")
-            lines.append("\n" + detail_block("查看政策依据", "\n".join(references)))
+            if len(claims) != len(proposal["claims"]):
+                lines.append("部分结论的引用无法核实，暂未展示。")
+            for ident, quotes in excerpts.items():
+                source = sources[ident]
+                label = ("配置摘录（项目已审核配置，非制度原文）" if source.get("source_type") == "reviewed_rule"
+                         else "原文摘录")
+                lines.append("\n" + detail_block("政策依据 · " + public_refs[ident],
+                    _public_source_label(source) + "\n\n" + label + "：\n" + "\n\n".join(quotes)))
         elif status == "clarify":
             lines.append(rag["proposal"]["question"])
         elif status == "unavailable" and isinstance(rag.get("diagnostic"), dict):

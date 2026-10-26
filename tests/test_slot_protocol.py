@@ -42,7 +42,7 @@ def accepted():
 
 
 class SlotProtocolTests(unittest.TestCase):
-    def run_proposal(self, replies, *, text="南京酒店；核验住宿金额319元", current=None,
+    def run_proposal(self, replies, *, text="南京酒店，2099-09-10入住，2099-09-11退房；费用日期2099-09-10，核验住宿金额319元", current=None,
                      review=None, **options):
         self.model = RawModel(replies)
         self.reviewer = RawModel([review or accepted()])
@@ -59,13 +59,31 @@ class SlotProtocolTests(unittest.TestCase):
 
     @staticmethod
     def hotel(index=0):
-        return {"task_index": index, "trip": {"query_scope": "hotel", "destination": "南京"},
-                "evidence": {"query_scope": {"quote": "酒店"}, "destination": {"quote": "南京"}}}
+        return {"task_index": index, "trip": {"query_scope": "hotel", "destination": "南京",
+                "check_in": "2099-09-10", "check_out": "2099-09-11"},
+                "evidence": {"query_scope": {"quote": "酒店"}, "destination": {"quote": "南京"},
+                             "check_in": {"quote": "2099-09-10"},
+                             "check_out": {"quote": "2099-09-11"}}}
 
     @staticmethod
     def expense(index=0):
-        return {"task_index": index, "expense": {"kind": "hotel", "amount": 319},
-                "evidence": {"amount": {"quote": "319元"}}}
+        return {"task_index": index, "expense": {"kind": "hotel", "expense_date": "2099-09-10",
+                "destination": "南京", "amount": 319},
+                "evidence": {"expense_date": {"quote": "2099-09-10"},
+                             "destination": {"quote": "南京"}, "amount": {"quote": "319元"}}}
+
+    def test_one_failed_line_does_not_discard_the_other(self):
+        bad = deepcopy(self.expense(1))
+        bad["evidence"]["amount"] = {"quote": "3199"}
+        result = self.run_proposal([
+            reply("TurnRoute", {"tasks": [self.new("policy_check", "住宿一"),
+                                          self.new("policy_check", "住宿二")]}),
+            reply("ExpenseExtraction", {"patches": [self.expense(0), bad]}),
+        ])
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(len(result["line_failures"]), 1)
+        self.assertEqual(len(result["tasks"]), 1)
+        self.assertIn("cite_exact_current_message", result["line_failures"][0]["reason"])
 
     def test_domain_can_clarify_ambiguous_meaning_without_committing_or_retrying(self):
         for intent, name, text, question in (
@@ -108,11 +126,40 @@ class SlotProtocolTests(unittest.TestCase):
             result = self.run_proposal([
                 reply("TurnRoute", {"tasks": [self.new(intent)]}),
                 reply(name, {"patches": [patch]}),
-            ], text="教职工，专业技术五级，住宿其他人员档，江苏南京酒店；核验住宿金额319元")
+            ], text="教职工，专业技术五级，住宿其他人员档，江苏南京酒店，2099-09-10入住，2099-09-11退房；费用日期2099-09-10，核验住宿金额319元")
             self.assertEqual(result["status"], "ok")
             values = result["tasks"][0]["subject"]["values"]
             self.assertEqual({key: values[key] for key in fields}, fields)
             self.assertFalse(values.get("employee_grade"))
+
+    def test_all_region_scope_expansion_reuses_existing_policy_subject(self):
+        subject = {
+            "id": "subject-policy", "revision": 2, "domain": "expense",
+            "values": {"kind": "hotel", "destination": "北京", "academic_title": "院士",
+                       "lodging_standard": "部级"},
+            "evidence": {}, "history": [], "result": {"old": True},
+            "intent": "policy_explain", "policy_query": {
+                "category": "hotel", "mode": "personal_limit"},
+            "validation": "context_reviewed",
+        }
+        current = {"expense": deepcopy(subject), "subjects": {subject["id"]: deepcopy(subject)}}
+        result = self.run_proposal([
+            reply("TurnRoute", {"tasks": [self.new("policy_explain", "所有地区的住宿标准都列举一下")]}),
+            reply("ExpenseExtraction", {"patches": [{
+                "task_index": 0, "expense": {"kind": "hotel"}, "policy_query": {
+                    "category": "hotel", "mode": "personal_limit", "coverage": "all_regions"},
+                "evidence": {},
+            }]}),
+        ], text="所有地区的住宿标准都列举一下", current=current,
+            task_context=[{"id": "task-policy", "intent": "policy_explain",
+                           "subject_id": subject["id"], "revision": subject["revision"],
+                           "status": "completed", "question": "我是院士，我的住宿标准是多少"}])
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["tasks"][0]["operation"], "update_facts")
+        self.assertEqual(result["tasks"][0]["subject"]["id"], subject["id"])
+        self.assertEqual(result["tasks"][0]["subject"]["values"]["destination"], "北京")
+        self.assertEqual(result["tasks"][0]["subject"]["values"]["academic_title"], "院士")
+        self.assertEqual(result["tasks"][0]["subject"]["policy_query"]["coverage"], "all_regions")
 
     def test_each_domain_receives_only_its_contract(self):
         for intent, name, patch, absent in [
@@ -173,12 +220,15 @@ class SlotProtocolTests(unittest.TestCase):
         model = RawModel([
             reply("TurnRoute", route),
             reply("ExpenseExtraction", {"patches": [{
-                "task_index": 0, "expense": {"kind": "hotel", "amount": 319},
-                "evidence": {"amount": {"user_message": 0, "quote": "319元"}}}]}),
+                "task_index": 0, "expense": {"kind": "hotel", "expense_date": "2099-09-08",
+                    "destination": "南京", "amount": 319},
+                "evidence": {"expense_date": {"user_message": 0, "quote": "2099-09-08"},
+                             "destination": {"user_message": 0, "quote": "南京"},
+                             "amount": {"user_message": 0, "quote": "319元"}}}]}),
         ])
-        result = extract_slots(model, [HumanMessage("核验住宿319元"), HumanMessage("重试刚才失败的核验")],
+        result = extract_slots(model, [HumanMessage("2099-09-08南京核验住宿319元"), HumanMessage("重试刚才失败的核验")],
             {}, 1, reviewer=RawModel([accepted()]),
-            pending_turns=[{"user_message": 0, "content": "核验住宿319元", "retryable": True}])
+            pending_turns=[{"user_message": 0, "content": "2099-09-08南京核验住宿319元", "retryable": True}])
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["resolved_pending_turns"], [0])
         subject = result["tasks"][0]["subject"]
@@ -188,9 +238,9 @@ class SlotProtocolTests(unittest.TestCase):
     def test_discard_has_no_domain_extraction_and_no_business_commit(self):
         route = {"recovery": {"action": "discard", "user_messages": [0], "evidence": {"quote": "放弃"}}}
         model, reviewer = RawModel([reply("TurnRoute", route)]), RawModel([accepted()])
-        result = extract_slots(model, [HumanMessage("核验住宿319元"), HumanMessage("放弃")],
+        result = extract_slots(model, [HumanMessage("2099-09-08南京核验住宿319元"), HumanMessage("放弃")],
             {}, 1, reviewer=reviewer,
-            pending_turns=[{"user_message": 0, "content": "核验住宿319元", "retryable": True}])
+            pending_turns=[{"user_message": 0, "content": "2099-09-08南京核验住宿319元", "retryable": True}])
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["tasks"], [])
         self.assertEqual(result["slots"], {})
@@ -276,6 +326,60 @@ class SlotProtocolTests(unittest.TestCase):
                 ])
                 self.assertEqual(result["status"], "error")
 
+    def test_missing_trip_facts_clarify_without_citing_scope_enum(self):
+        cases = (
+            ("查南京的酒店。", {"query_scope": "hotel", "destination": "南京"},
+             {"destination": {"quote": "南京"}}, ["check_in", "check_out"], "入住日期"),
+            ("来一张去北京的票", {"query_scope": "transport", "destination": "北京"},
+             {"destination": {"quote": "北京"}}, ["origin", "departure_date"], "出发地"),
+        )
+        for text, trip, evidence, fields, label in cases:
+            with self.subTest(text=text):
+                model = RawModel([
+                    reply("TurnRoute", {"tasks": [self.new("plan_trip", text)]}),
+                    reply("TripExtraction", {"patches": [{
+                        "task_index": 0, "trip": trip, "evidence": evidence}]}),
+                ])
+                reviewer = RawModel([])
+                result = extract_slots(model, [HumanMessage(text)], {}, 3, reviewer=reviewer)
+                self.assertEqual(result["status"], "clarify")
+                self.assertEqual(result["missing_fields"], fields)
+                self.assertIn(label, result["question"])
+                self.assertEqual(len(model.calls), 2)
+                self.assertFalse(reviewer.calls)
+
+    def test_unstated_journey_is_dropped_and_missing_transport_facts_are_asked(self):
+        text = "来一张去北京的票"
+        model = RawModel([
+            reply("TurnRoute", {"tasks": [self.new("plan_trip", text)]}),
+            reply("TripExtraction", {"patches": [{
+                "task_index": 0,
+                "trip": {"query_scope": "transport", "journey": "one_way", "destination": "北京"},
+                "evidence": {"destination": {"quote": "北京"}}}]}),
+        ])
+        reviewer = RawModel([])
+        result = extract_slots(model, [HumanMessage(text)], {}, 3, reviewer=reviewer)
+        self.assertEqual(result["status"], "clarify")
+        self.assertEqual(result["missing_fields"], ["origin", "departure_date"])
+        self.assertIn("出发地", result["question"])
+        self.assertIn("出发日期", result["question"])
+        self.assertNotIn("journey", result["clarification"]["draft_slots"]["trip"]["values"])
+        self.assertEqual(len(model.calls), 2)
+        self.assertFalse(reviewer.calls)
+
+    def test_destination_without_exact_quote_is_still_rejected(self):
+        model = RawModel([
+            reply("TurnRoute", {"tasks": [self.new("plan_trip", "查南京的酒店。")]}),
+            reply("TripExtraction", {"patches": [{
+                "task_index": 0,
+                "trip": {"query_scope": "hotel", "destination": "南京"},
+                "evidence": {"destination": {"quote": "北京"}}}]}),
+        ])
+        result = extract_slots(model, [HumanMessage("查南京的酒店。")], {}, 1,
+                               reviewer=RawModel([]))
+        self.assertEqual(result["status"], "error")
+        self.assertIn("destination:cite_exact_current_message", str(result["validation_errors"]))
+
     def test_unselected_historical_evidence_is_rejected(self):
         model = RawModel([
             reply("TurnRoute", {"tasks": [self.new("policy_check")]}),
@@ -295,7 +399,7 @@ class SlotProtocolTests(unittest.TestCase):
             reply("TurnRoute", {"tasks": [self.new("plan_trip")]}),
             reply("TripExtraction", {"patches": [self.hotel()]}),
         ])
-        result = extract_slots(model, [HumanMessage("南京酒店")], {}, 2, reviewer=RawModel([accepted()]))
+        result = extract_slots(model, [HumanMessage("南京酒店，2099-09-10入住，2099-09-11退房")], {}, 2, reviewer=RawModel([accepted()]))
         self.assertEqual(result["status"], "ok")
         self.assertEqual(len(model.calls), 4)
         retry = json.loads(model.calls[2][-1].content)
@@ -303,7 +407,8 @@ class SlotProtocolTests(unittest.TestCase):
 
     def test_same_intent_change_rejected_then_model_can_repair_as_fact_update(self):
         subject = {"id": "s", "domain": "trip", "revision": 3, "intent": "plan_trip",
-                   "values": {"query_scope": "hotel", "destination": "成都"}, "evidence": {},
+                   "values": {"query_scope": "hotel", "destination": "成都",
+                              "check_in": "2099-09-10", "check_out": "2099-09-11"}, "evidence": {},
                    "history": []}
         ledger = [{"id": "t", "subject_id": "s", "revision": 3, "intent": "plan_trip",
                    "status": "completed", "attempt": 1}]
@@ -356,7 +461,7 @@ class SlotProtocolTests(unittest.TestCase):
             reply("TripExtraction", {"patches": [self.hotel()]}),
         ])
         reviewer = RawModel([accepted()])
-        result = extract_slots(model, [HumanMessage("南京酒店")], {}, 2, reviewer=reviewer)
+        result = extract_slots(model, [HumanMessage("南京酒店，2099-09-10入住，2099-09-11退房")], {}, 2, reviewer=reviewer)
         self.assertEqual(result["status"], "ok")
         self.assertEqual(len(reviewer.calls), 1)
         retry = json.loads(model.calls[2][-1].content)
@@ -382,7 +487,7 @@ class SlotProtocolTests(unittest.TestCase):
                         reply("TurnRoute", {"tasks": [self.new("plan_trip")]}),
                         reply("TripExtraction", {"patches": [self.occupancy_patch(
                             hotel_rooms=1, hotel_adults=adults, hotel_child_ages=children, **occupancy)]}),
-                    ], text="南京酒店入住安排")
+                    ], text="南京酒店，2099-09-10入住，2099-09-11退房；入住安排")
                     self.assertEqual(result["status"], "error")
                     self.assertIn("single_room_occupancy_requires_reconciliation", str(result))
                     self.assertNotIn("slots", result)
@@ -400,7 +505,7 @@ class SlotProtocolTests(unittest.TestCase):
                 result = self.run_proposal([
                     reply("TurnRoute", {"tasks": [self.new("plan_trip")]}),
                     reply("TripExtraction", {"patches": [self.occupancy_patch(**fields)]}),
-                ], text="南京酒店入住安排")
+                ], text="南京酒店，2099-09-10入住，2099-09-11退房；入住安排")
                 self.assertEqual(result["status"], "ok")
                 self.assertIsNone(result["slots"]["trip"]["values"].get("room_occupants"))
 
@@ -413,7 +518,7 @@ class SlotProtocolTests(unittest.TestCase):
                 self.occupancy_patch(**party, room_occupants=3)]}),
         ])
         reviewer = RawModel([accepted()])
-        result = extract_slots(model, [HumanMessage("南京酒店入住安排")], {}, 2, reviewer=reviewer)
+        result = extract_slots(model, [HumanMessage("南京酒店，2099-09-10入住，2099-09-11退房；入住安排")], {}, 2, reviewer=reviewer)
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["slots"]["trip"]["values"]["room_occupants"], 3)
         self.assertEqual(len(model.calls), 4)

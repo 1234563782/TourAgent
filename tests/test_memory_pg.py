@@ -117,7 +117,6 @@ class LegacyImportTests(unittest.TestCase):
         self.memory = TravelMemory(self.root, self.legacy, "one")
 
     def test_all_trips_imported_not_only_last_ten_and_source_unchanged(self):
-        self.memory.save_preferences([{"type": "seat", "value": "aisle"}])
         for idx in range(14):
             self.memory.save_trip({"id": f"trip-{idx}"})
         TravelMemory(self.root, self.legacy, "two").save_trip({"id": "other"})
@@ -131,11 +130,12 @@ class LegacyImportTests(unittest.TestCase):
         self.assertEqual(before, hashlib.sha256(path.read_bytes()).hexdigest())
         self.assertEqual(inventory(self.root, self.legacy)["users"], ["one", "two"])
 
-    def test_legacy_object_preferences_preserved_and_sqlite_takes_precedence(self):
-        (self.legacy / "one.json").write_text('{"preferences":{"seat":"aisle"}}', encoding="utf-8")
-        self.assertEqual(read_snapshot(self.root, self.legacy, "one").preferences, {"seat": "aisle"})
-        self.memory.save_preferences([])
-        self.assertEqual(read_snapshot(self.root, self.legacy, "one").preferences, [])
+    def test_legacy_preferences_are_discarded_and_do_not_block_trips(self):
+        (self.legacy / "one.json").write_text(
+            '{"preferences":{"seat":"aisle"},"trip_history":[{"id":"kept"}]}', encoding="utf-8")
+        snapshot = read_snapshot(self.root, self.legacy, "one")
+        self.assertEqual(snapshot.trips, [{"id": "kept"}])
+        self.assertNotIn("preferences", snapshot.summary())
 
     def test_legacy_missing_id_and_conflicts_stop_instead_of_dropping(self):
         path = self.legacy / "one.json"
@@ -169,24 +169,23 @@ class RepositorySQLTests(unittest.TestCase):
             with self.assertRaises(PermissionError):
                 build_assistant(MagicMock(), self.settings, self.memory, MagicMock(), checkpointer=saver)
 
-    def test_preferences_scope_and_content_are_bound_parameters(self):
+    def test_trip_scope_and_content_are_bound_parameters(self):
         connection = MagicMock()
         connection.__enter__.return_value = connection
+        saved = {"id": "';DROP TABLE trips;--"}
+        connection.execute.return_value.fetchone.return_value = {"data": saved}
         with patch("business_travel.memory_pg.memory_connection", return_value=connection):
-            self.memory.save_preferences([{"type": "seat", "value": "';DROP TABLE trips;--"}])
-        query, params = connection.execute.call_args.args
+            self.memory.save_trip(saved)
+        query, params = connection.execute.call_args_list[0].args
         self.assertNotIn("DROP", query)
         self.assertEqual(params[:2], ("company", "one"))
-        self.assertIn("ON CONFLICT(company_id,user_id)", query)
+        self.assertIn("ON CONFLICT(company_id,user_id,draft_id)", query)
 
     def test_invalid_writes_never_connect(self):
         with patch("business_travel.memory_pg.memory_connection") as connect:
             for draft in ({}, {"id": None}, {"id": ""}):
                 with self.assertRaises(ValueError):
                     self.memory.save_trip(draft)
-            for prefs in ({}, ["invalid"]):
-                with self.assertRaises(ValueError):
-                    self.memory.save_preferences(prefs)
         connect.assert_not_called()
 
 

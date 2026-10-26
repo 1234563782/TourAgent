@@ -9,10 +9,6 @@ from evals.real_agent_batch import describe_turn, load_candidates, summarize
 
 class BatchReportTests(unittest.TestCase):
     def test_describe_turn_reports_observation_without_claiming_correctness(self):
-        class Memory:
-            def preference_snapshot(self):
-                return {"items": []}
-
         state = {
             "messages": [
                 ToolMessage(name="consult_policy", content='{"status":"unavailable"}', tool_call_id="1"),
@@ -20,7 +16,7 @@ class BatchReportTests(unittest.TestCase):
             ],
             "tasks": {"a": {"status": "pending", "subject_id": "s", "revision": 2}},
         }
-        turn = describe_turn(state, Memory())
+        turn = describe_turn(state)
         self.assertEqual(turn["status"], "completed")
         self.assertEqual(turn["tool_statuses_seen"], [{"name": "consult_policy", "status": "unavailable"}])
         self.assertEqual(turn["tasks"][0]["revision"], 2)

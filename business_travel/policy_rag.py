@@ -1,5 +1,6 @@
 """Bounded policy explanations with exact citations and a separate semantic review."""
 
+import inspect
 import json
 from typing import Literal
 
@@ -98,6 +99,12 @@ class PolicyAnswerReview(Contract):
         default_factory=list, max_length=6,
         description="拒绝原因，只选择适用的原因；接受时为空。不输出自由文本或用户隐私。")
 
+    @model_validator(mode="after")
+    def consistent_verdict(self):
+        if self.verdict == "accept" and self.issues:
+            raise ValueError("accepted_review_cannot_have_issues")
+        return self
+
 
 class PolicyClaimCheck(Contract):
     claim_index: int = Field(ge=0, strict=True, description="proposal.claims 中的零起始编号，每项恰好审核一次。")
@@ -126,14 +133,18 @@ original_request只提供历史上下文，不覆盖本轮明确改变的问题�
 policy_query.mode描述本轮要回答的问题，不等同于固定的policy_explain意图。
 改写与原话冲突时以原话为准：未提供条件不等于拒绝提供或要求忽略条件。
 facts 是上游已审阅的用户陈述，不代表学校或组织系统核实，未知字段保持未知。
+账号已绑定的职称、岗位等级和住宿人员档次以 facts 为准。request_context.identity_notes 必须原意告知；对话不能补写或抬高未维护的身份，也不能用交通身份推导住宿身份。
 管理员当前发布的资料就是本项目采用的政策，不询问政策生效日、适用年份或版本。
 expense_date只表示实际或计划的费用/入住日期，政策年份不能当作业务日期，未知时不以今天替代。
 一般政策介绍不要求日期。个人住宿标准仅在当地该档次有季节差价时需要实际入住日期；
 已在facts给出的日期、地区和档次不得重复索要，lodging_lookup的missing_fields说明尚缺的计算条件。
 只用所给 sources，不能以常识、其他组织制度或互联网内容补足政策。
 资料包的 adoption_note 说明项目适用口径，不更改原文日期，也不是外部现行效力证明。
-高校交通类别与住宿附表人员档次是两个体系，没有对应依据就不能互相推断。
-询问附表待遇时称“住宿人员档次”，不要称为“职称级别”或要求通过职称推算。
+交通身份和住宿身份是两套独立标准，不能互相推导，也不能要求财务补建对应关系。
+院士、职称和岗位等级只确定交通类别，不能推出部级、司局级或其他人员。
+resolved_standards里的住宿档次只表示单独给出的住宿身份；为空就表示个人住宿档次未知。
+没有住宿身份时可以列出附表各档作参考，并明确这不是该交通身份的个人限额。
+不得把一类、院士或其他交通身份说成某一住宿档次。住宿金额还须引用同版本附表原文。
 住宿元/人·天不等于元/间夜，保留省市、旺季地区和月份/旬的限制，不套其他城市金额。
 只做参考规划和政策解释；涉及批准条件时解释条件，不声称系统办理审批或下单。
 交通意外险购买报销条款不能证明某事故属于保险赔付范围；没有保单就说明依据不足。
@@ -185,7 +196,9 @@ scoped_request来自已分配的任务，不是独立事实证据，也不能通
 request_context.original_request、字段来源和current_changes用于理解本事项的多轮上下文；
 policy_query是上游已独立复核的目标分类，不能因为缺条件改成一般介绍。
 缺少条件不等于不愿提供条件，也不等于不涉及这些条件。只审核当前事项，不扩展到其他事项。
-高校交通类别、职称与住宿附表人员档次不同，没有依据不能互相推断。
+交通身份和住宿身份互相独立。不得接受把院士、一类或其他交通身份写成部级、司局级或其他人员的结论。
+resolved_standards没有住宿档次时，个人住宿限额未知；列出各档参考可以接受，建议财务补建对应关系不可以接受。
+住宿金额仍须由同版本附表及lodging_lookup支持。
 adoption_note只说明项目采用口径，不能声称外部核实了现行效力；不根据交通险购买条款承诺理赔。
 当前发布资料即本项目采用政策，不能要求用户确认政策生效时间。expense_date仅为真实业务日期。
 一般咨询不需要日期；个人住宿标准若不受季节影响也不需要日期，已有facts不得重复追问。
@@ -198,7 +211,7 @@ REVIEW_PROMPT = REVIEW_CONTEXT + """
 answer 只有在每项结论均由所引用的原文支持、完整回答问题、没有遗漏影响结论的适用条件/
 例外/单位/否定语义、没有猜测用户事实、没有个人合规或审批结论时才能 accept。
 原文包含某个词或金额不等于结论成立；还应检查未被引用的来源是否限制或否定结论。
-高校住宿档次不能由交通类别推断；必须核对人天单位、具体适用地区、旺季条件。
+住宿档次不能由交通身份推导。没有单独的住宿身份时，不能把某一档写成个人标准，也不能要求用户或财务建立院士与部级的对应。必须核对人天单位、具体适用地区、旺季条件。
 个人标准缺决定性条件时不能把泛泛介绍冒充个人结论；条件齐全时仅列平旺季而不明确当前适用标准也不通过。
 partial按部分回答审核：引用必须支持每项结论，limitations必须如实覆盖未解决部分并给出核实建议；
 允许在个人映射未知时列出有依据的档次标准，但须明确不是已确认的个人限额，不能猜测对应关系。
@@ -225,7 +238,7 @@ EVIDENCE_REVIEW_PROMPT = REVIEW_CONTEXT.replace(
 supported只判断该条结论：引用原文是否支持、适用条件/单位/例外/否定是否完整、
 是否猜测用户事实或跨待遇体系推断；还需考虑其他sources中的限制和反例。
 limitations_valid检查所有未解决事项是否如实说明并给出核实建议：
-没有目的地可以说明无法确定住宿金额并询问目的地；缺映射可以明确无法确定个人档次。
+没有目的地可以说明无法确定住宿金额并询问目的地；缺少住宿身份可以说明个人档次未知，不能把这说成需要补建交通身份到住宿档次的映射。
 不因这些已披露缺口将有依据的交通结论标为不支持；不得在limitations夹带未引用的金额或政策要求。
 如果已有相关依据被无故遗漏且没有如实说明，或错误声称资料不存在，limitations_valid为false。
 scope_preserved判断是否仍然回答本事项目标，不要求已披露的未解决事项现在就得出结论。
@@ -311,6 +324,42 @@ def _validate_citations(proposal, sources):
                     "detail": "quote_not_in_source", "source_text": source["text"],
                     "guidance": "Select the source_id and omit quote to attach original text; "
                                 "never rewrite the source or alter its whitespace."})
+
+
+def merge_policy_evidence(previous, sources):
+    """Use the same bounded evidence projection for generation and retrieval evaluation."""
+    evidence = [{key: value for key, value in item.items() if key != "source_id"}
+                for item in previous]
+    for source in sources:
+        item = {key: source.get(key) for key in (
+            "source", "version", "document_id", "source_sha256", "chunk", "clause", "section", "text",
+            "file_sha256", "sheet", "cell_range", "adoption_note", "source_type")}
+        if item not in evidence:
+            evidence.append(item)
+    return [{**item, "source_id": f"S{index}"} for index, item in enumerate(evidence, start=1)]
+
+
+def _retrieve_policy(store, query, facts, policy_query):
+    """Call the policy store with the extended scope when it supports it.
+
+    Older test doubles and legacy stores keep the two-argument contract; the
+    compatibility branch lets them continue serving ordinary target queries.
+    """
+    if not callable(getattr(type(store), "search_for_facts", None)):
+        return store.search(query)
+    method = store.search_for_facts
+    try:
+        parameters = inspect.signature(method).parameters
+    except (TypeError, ValueError):
+        parameters = {}
+    if "policy_query" in parameters:
+        return method(query, facts, policy_query=policy_query)
+    return method(query, facts)
+
+
+def policy_evidence_over_budget(evidence, settings):
+    return (len(evidence) > settings.policy_context_limit
+            or len(json.dumps(evidence, ensure_ascii=False)) > settings.policy_context_chars)
 
 
 def _review_evidence(model_factory, payload, proposal):
@@ -454,16 +503,15 @@ def explain_policy(store, model_factory, settings, question, *, facts=None, user
             report_stage("policy_retrieve")
             with observation("policy_retrieve", kind="retriever", attempt=retrievals) as span:
                 span.content(input={"query": query, "facts": facts})
-                if callable(getattr(type(store), "search_for_facts", None)):
-                    retrieved = store.search_for_facts(query, facts)
-                else:
-                    retrieved = store.search(query)
+                retrieved = _retrieve_policy(store, query, facts, policy_query)
                 span.content(output=retrieved)
                 if isinstance(retrieved, dict):
                     sources = retrieved.get("sources")
                     span.update(status=retrieved.get("status"),
                                 count=len(sources) if isinstance(sources, list) else None,
-                                context_incomplete=retrieved.get("context_incomplete"))
+                                context_incomplete=retrieved.get("context_incomplete"),
+                                degraded=retrieved.get("degraded"),
+                                vector_error_code=retrieved.get("vector_error_code"))
         except Exception:
             return finish("unavailable", diagnostic={
                 "stage": "policy_retrieve", "failure_code": "policy_retrieval_failed"})
@@ -506,23 +554,34 @@ def explain_policy(store, model_factory, settings, question, *, facts=None, user
         pinned = versions
         # Table grids duplicate unrelated rows. The row text already carries its headers;
         # send only textual evidence and provenance, never an unbounded whole-grid payload.
-        evidence = [{key: value for key, value in item.items() if key != "source_id"}
-                    for item in data["sources"]]
         for source in sources:
             if not isinstance(source.get("text"), str) or not source["text"].strip():
                 return finish("incomplete")
-            item = {key: source.get(key) for key in (
-                "source", "version", "document_id", "source_sha256", "chunk", "clause", "section", "text",
-                "file_sha256", "sheet", "cell_range", "adoption_note")}
-            if item not in evidence:
-                evidence.append(item)
-        for index, item in enumerate(evidence, start=1):
-            item["source_id"] = f"S{index}"
+        evidence = merge_policy_evidence(data["sources"], sources)
         data["sources"] = evidence
         data["context_incomplete"] = bool(retrieved.get("context_incomplete"))
-        if (data["context_incomplete"]
-                or len(evidence) > settings.policy_context_limit
-                or len(json.dumps(evidence, ensure_ascii=False)) > settings.policy_context_chars):
+        lodging_table = retrieved.get("lodging_table")
+        if isinstance(lodging_table, dict) and lodging_table.get("status") == "ok":
+            rows = lodging_table.get("rows")
+            source_chunks = lodging_table.get("source_chunks")
+            by_chunk = {item.get("chunk"): item for item in evidence}
+            if (not isinstance(rows, list) or not rows
+                    or not isinstance(source_chunks, list)
+                    or len(source_chunks) != len(rows)
+                    or any(not isinstance(item, dict) or item.get("row_id") != chunk
+                           for item, chunk in zip(rows, source_chunks))
+                    or any(chunk not in by_chunk for chunk in source_chunks)):
+                data["reason"] = "lodging_table_sources_incomplete"
+                return finish("insufficient")
+            for row, chunk in zip(rows, source_chunks):
+                row["source_ref"] = by_chunk[chunk]["source_id"]
+            data["lodging_table"] = lodging_table
+            data["context_incomplete"] = False
+            resolved = retrieved.get("resolved_standards")
+            if isinstance(resolved, dict):
+                data["resolved_standards"] = resolved
+            return finish("answered")
+        if data["context_incomplete"] or policy_evidence_over_budget(evidence, settings):
             data["context_incomplete"] = True
             return finish("incomplete")
         payload = {"question": question, "user_request": user_request or question,
@@ -530,6 +589,11 @@ def explain_policy(store, model_factory, settings, question, *, facts=None, user
                    "retrieval_query": query,
                    "facts": facts or {}, "sources": evidence,
                    "retrievals_remaining": settings.policy_rag_max_retrievals - retrievals}
+        resolved = retrieved.get("resolved_standards")
+        if (isinstance(resolved, dict) and resolved.get("source_chunk") in {
+                item["chunk"] for item in evidence if item.get("source_type") == "reviewed_rule"}):
+            payload["resolved_standards"] = resolved
+            data["resolved_standards"] = resolved
         exact = retrieved.get("lodging_lookup")
         if (isinstance(exact, dict) and exact.get("status") in {"ok", "insufficient_information"}
                 and exact.get("date") == (facts or {}).get("expense_date")

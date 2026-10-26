@@ -46,9 +46,12 @@ class Settings:
     max_steps: int = 30
     policy_max_checks: int = 3
     slot_max_attempts: int = 3
+    slot_kind_discovery: bool = True
     slot_context_limit: int = 16
     slot_task_limit: int = 4
     planner_max_attempts: int = 2
+    planner_candidate_mode: str = "compact"
+    planner_query_mode: str = "parallel"
     context_window_tokens: int = 65536
     context_output_tokens: int = 8192
     context_margin_tokens: int = 4096
@@ -59,6 +62,9 @@ class Settings:
     context_read_tokens: int = 6000
     context_role_input_tokens: dict = field(default_factory=dict)
     model_extra_body: dict | None = field(default=None, repr=False)
+    prompt_date_mode: str = "suffix"
+    default_mainland_business_trip: bool = True
+    default_single_guest: bool = True
     max_candidates: int = 10
     travel_provider: str = "tuniu"
     tuniu_flight_url: str = "https://openapi.tuniu.cn/hybrid/mcp/flight"
@@ -84,13 +90,25 @@ class Settings:
     embedding_dimensions: int = 0
     embedding_revision: str = "1"
     embedding_batch_size: int = 1
+    policy_hnsw_m: int = 16
+    policy_hnsw_ef_construction: int = 128
+    policy_hnsw_ef_search: int = 80
     policy_top_k: int = 5
     policy_recall_k: int = 20
     policy_rrf_k: int = 60
+    policy_rerank_mode: str = "qwen"
+    rerank_base_url: str = "https://maas.qianwenaiapi.com/api/v1"
+    rerank_api_key: str = field(default="", repr=False)
+    rerank_model: str = "qwen3-rerank"
+    rerank_timeout: float = 8
+    rerank_candidates: int = 40
     policy_context_limit: int = 40
     policy_context_chars: int = 24000
     policy_rag_max_retrievals: int = 2
     policy_rag_max_answer_attempts: int = 2
+    policy_citation_mode: str = "fragments"
+    policy_check_mode: str = "estimate"
+    reimbursement_max_nights: int = 366
     policy_dictionary_path: Path | None = None
     memory_database_url: str = field(default="", repr=False)
     memory_company_id: str = ""
@@ -118,6 +136,14 @@ class Settings:
     langfuse_public_key: str = field(default="", repr=False)
     langfuse_secret_key: str = field(default="", repr=False)
     langfuse_hash_key: str = field(default="", repr=False)
+    jev_enabled: bool = True
+    jev_mode: str = "primary"
+    jev_api_key: str = field(default="", repr=False)
+    jev_base_url: str = "https://api.typesafe.ai"
+    jev_model: str = "jev-latest"
+    jev_endpoint: str = "/v1/systemone"
+    jev_timeout: float = 15
+    jev_intent_threshold: float = 0.8
 
     @classmethod
     def from_env(cls, env_file: Path | None = None):
@@ -158,9 +184,15 @@ class Settings:
             max_steps=int(getenv("TRAVEL_MAX_STEPS", "30")),
             policy_max_checks=int(getenv("TRAVEL_POLICY_MAX_CHECKS", "3")),
             slot_max_attempts=int(getenv("TRAVEL_SLOT_MAX_ATTEMPTS", "3")),
+    slot_kind_discovery=getenv("TRAVEL_SLOT_KIND_DISCOVERY", "1").strip().lower() in {"1", "true", "yes"},
             slot_context_limit=int(getenv("TRAVEL_SLOT_CONTEXT_LIMIT", "16")),
             slot_task_limit=int(getenv("TRAVEL_SLOT_TASK_LIMIT", "4")),
             planner_max_attempts=int(getenv("TRAVEL_PLANNER_MAX_ATTEMPTS", "2")),
+            planner_candidate_mode=getenv("TRAVEL_PLANNER_CANDIDATE_MODE", "compact").strip().lower(),
+            planner_query_mode=getenv("TRAVEL_PLANNER_QUERY_MODE", "parallel").strip().lower(),
+            policy_citation_mode=getenv("TRAVEL_POLICY_CITATION_MODE", "fragments").strip().lower(),
+            policy_check_mode=getenv("TRAVEL_POLICY_CHECK_MODE", "estimate").strip().lower(),
+            reimbursement_max_nights=int(getenv("TRAVEL_REIMBURSEMENT_MAX_NIGHTS", "366")),
             context_window_tokens=int(getenv("TRAVEL_CONTEXT_WINDOW_TOKENS", "65536")),
             context_output_tokens=int(getenv("TRAVEL_CONTEXT_OUTPUT_TOKENS", "8192")),
             context_margin_tokens=int(getenv("TRAVEL_CONTEXT_MARGIN_TOKENS", "4096")),
@@ -171,6 +203,10 @@ class Settings:
             context_read_tokens=int(getenv("TRAVEL_CONTEXT_READ_TOKENS", "6000")),
             context_role_input_tokens=role_budgets,
             model_extra_body=extra_body,
+            prompt_date_mode=getenv("TRAVEL_PROMPT_DATE_MODE", "suffix").strip().lower(),
+            default_mainland_business_trip=getenv(
+                "TRAVEL_DEFAULT_MAINLAND_BUSINESS_TRIP", "1").strip() == "1",
+            default_single_guest=getenv("TRAVEL_DEFAULT_SINGLE_GUEST", "1").strip() == "1",
             max_candidates=int(getenv("TRAVEL_MAX_CANDIDATES", "10")),
             travel_provider=getenv("TRAVEL_PROVIDER", "tuniu").strip(),
             tuniu_flight_url=getenv("TUNIU_FLIGHT_MCP_URL") or f"https://openapi.tuniu.cn{prefix}/flight",
@@ -196,9 +232,19 @@ class Settings:
             embedding_dimensions=int(getenv("TRAVEL_EMBEDDING_DIMENSIONS") or "0"),
             embedding_revision=getenv("TRAVEL_EMBEDDING_REVISION") or "1",
             embedding_batch_size=int(getenv("TRAVEL_EMBEDDING_BATCH_SIZE") or "1"),
+            policy_hnsw_m=int(getenv("TRAVEL_POLICY_HNSW_M") or "16"),
+            policy_hnsw_ef_construction=int(getenv("TRAVEL_POLICY_HNSW_EF_CONSTRUCTION") or "128"),
+            policy_hnsw_ef_search=int(getenv("TRAVEL_POLICY_HNSW_EF_SEARCH") or "80"),
             policy_top_k=int(getenv("TRAVEL_POLICY_TOP_K") or "5"),
             policy_recall_k=int(getenv("TRAVEL_POLICY_RECALL_K") or "20"),
             policy_rrf_k=int(getenv("TRAVEL_POLICY_RRF_K") or "60"),
+            policy_rerank_mode=(getenv("TRAVEL_POLICY_RERANK_MODE") or "qwen").strip(),
+            rerank_base_url=(getenv("TRAVEL_RERANK_BASE_URL")
+                             or cls.rerank_base_url).strip().rstrip("/"),
+            rerank_api_key=getenv("TRAVEL_RERANK_API_KEY", "").strip(),
+            rerank_model=(getenv("TRAVEL_RERANK_MODEL") or "qwen3-rerank").strip(),
+            rerank_timeout=float(getenv("TRAVEL_RERANK_TIMEOUT") or "8"),
+            rerank_candidates=int(getenv("TRAVEL_RERANK_CANDIDATES") or "40"),
             policy_context_limit=int(getenv("TRAVEL_POLICY_CONTEXT_LIMIT") or "40"),
             policy_context_chars=int(getenv("TRAVEL_POLICY_CONTEXT_CHARS") or "24000"),
             policy_rag_max_retrievals=int(getenv("TRAVEL_POLICY_RAG_MAX_RETRIEVALS") or "2"),
@@ -220,6 +266,14 @@ class Settings:
             langfuse_public_key=getenv("LANGFUSE_PUBLIC_KEY", "").strip(),
             langfuse_secret_key=getenv("LANGFUSE_SECRET_KEY", "").strip(),
             langfuse_hash_key=getenv("TRAVEL_LANGFUSE_HASH_KEY", "").strip(),
+            jev_enabled=getenv("JEV_ENABLED", "1").strip() == "1",
+            jev_mode=getenv("JEV_MODE", "primary").strip().lower(),
+            jev_api_key=getenv("JEV_API_KEY", "").strip(),
+            jev_base_url=getenv("JEV_BASE_URL", "https://api.typesafe.ai").strip().rstrip("/"),
+            jev_model=getenv("JEV_MODEL", "jev-latest").strip(),
+            jev_endpoint=getenv("JEV_ENDPOINT", "/v1/systemone").strip(),
+            jev_timeout=float(getenv("JEV_TIMEOUT_SECONDS", "15")),
+            jev_intent_threshold=float(getenv("JEV_INTENT_THRESHOLD", "0.8")),
         )
         if settings.timeout <= 0 or settings.max_steps < 4 or settings.max_candidates < 1:
             raise ValueError("Timeout, step limit and candidate limit must be positive")
@@ -235,6 +289,26 @@ class Settings:
             raise ValueError("Task limit requires a larger TRAVEL_MAX_STEPS")
         if settings.travel_provider not in {"tuniu", "flyai"}:
             raise ValueError("TRAVEL_PROVIDER must be tuniu or flyai")
+        if settings.prompt_date_mode not in {"prefix", "suffix"}:
+            raise ValueError("TRAVEL_PROMPT_DATE_MODE must be prefix or suffix")
+        if settings.planner_candidate_mode not in {"full", "compact"}:
+            raise ValueError("TRAVEL_PLANNER_CANDIDATE_MODE must be full or compact")
+        if settings.planner_query_mode not in {"serial", "parallel"}:
+            raise ValueError("TRAVEL_PLANNER_QUERY_MODE must be serial or parallel")
+        if settings.policy_citation_mode not in {"fragments", "grouped"}:
+            raise ValueError("TRAVEL_POLICY_CITATION_MODE must be fragments or grouped")
+        if settings.policy_check_mode not in {"estimate", "legacy"}:
+            raise ValueError("TRAVEL_POLICY_CHECK_MODE must be estimate or legacy")
+        if not 1 <= settings.reimbursement_max_nights <= 366:
+            raise ValueError("TRAVEL_REIMBURSEMENT_MAX_NIGHTS must be between 1 and 366")
+        if settings.jev_mode not in {"shadow", "primary"}:
+            raise ValueError("JEV_MODE must be shadow or primary")
+        if not settings.jev_base_url or not settings.jev_endpoint.startswith("/"):
+            raise ValueError("JEV_BASE_URL and JEV_ENDPOINT must be configured as an absolute API path")
+        if not settings.jev_model or not 1 <= settings.jev_timeout <= 120:
+            raise ValueError("JEV model and timeout must be valid")
+        if not 0.5 < settings.jev_intent_threshold <= 1:
+            raise ValueError("JEV_INTENT_THRESHOLD must be greater than 0.5 and at most 1")
         if (not 0 <= settings.tuniu_hotel_detail_limit <= 10
                 or not 1 <= settings.tuniu_hotel_rate_limit <= 20
                 or not 0 < settings.tuniu_hotel_detail_timeout <= 120
@@ -254,6 +328,16 @@ class Settings:
             raise ValueError("Invalid memory connection timeout or history limit")
         if not 1 <= settings.embedding_batch_size <= 64:
             raise ValueError("TRAVEL_EMBEDDING_BATCH_SIZE must be between 1 and 64")
+        if not 4 <= settings.policy_hnsw_m <= 100:
+            raise ValueError("TRAVEL_POLICY_HNSW_M must be between 4 and 100")
+        if not settings.policy_hnsw_m <= settings.policy_hnsw_ef_construction <= 1000:
+            raise ValueError("TRAVEL_POLICY_HNSW_EF_CONSTRUCTION must be between m and 1000")
+        if not 1 <= settings.policy_hnsw_ef_search <= 10000:
+            raise ValueError("TRAVEL_POLICY_HNSW_EF_SEARCH must be between 1 and 10000")
+        if settings.policy_rerank_mode not in {"rrf", "qwen"}:
+            raise ValueError("TRAVEL_POLICY_RERANK_MODE must be rrf or qwen")
+        if not (0 < settings.rerank_timeout <= 60 and 1 <= settings.rerank_candidates <= 200):
+            raise ValueError("Invalid rerank timeout or candidate limit")
         if not (1 <= settings.policy_top_k <= settings.policy_recall_k <= 100
                 and settings.policy_rrf_k > 0
                 and settings.policy_top_k <= settings.policy_context_limit <= 200

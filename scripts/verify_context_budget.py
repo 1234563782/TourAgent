@@ -99,7 +99,7 @@ def run(settings, report, turns):
                 record["checks"]["exact_original_read"] = any(
                     item.get("complete") is True and item.get("message_index") == 0
                     and json.loads(item["text"])["content"] == questions[0] for item in reads)
-            record["checks"]["no_memory_write"] = memory.read()["trip_history"] == [] and memory.read()["preferences"] == []
+            record["checks"]["no_memory_write"] = memory.read() == {"trip_history": []}
             record["status"] = "passed" if all(record["checks"].values()) else "failed"
             print(json.dumps({"turn": index + 1, "status": record["status"]}), flush=True)
             if record["status"] != "passed":

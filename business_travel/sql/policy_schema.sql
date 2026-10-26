@@ -40,6 +40,8 @@ CREATE TABLE IF NOT EXISTS policy_chunks (
     CHECK (vector_dims(embedding) = embedding_dimensions)
 );
 CREATE INDEX IF NOT EXISTS policy_chunks_keywords_idx ON policy_chunks USING gin (keywords);
+-- 向量 HNSW 索引按运行时 Embedding 维度创建，见 PostgresPolicyStore.initialize/migrate_hnsw。
+-- 不能在这里写死 vector(维度)，否则更换模型会把索引表达式与实际向量维度混用。
 
 CREATE TABLE IF NOT EXISTS policy_rules (
     document_id bigint PRIMARY KEY REFERENCES policy_documents(id),

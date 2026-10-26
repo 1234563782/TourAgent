@@ -9,19 +9,22 @@ from typing import Annotated, Literal
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from pydantic import Field, ValidationError
 
-from .contracts import Contract
+from .contracts import Contract, parse_query_request
+from .jev import TASK_SCOPES
 from .models import model_error_details, safe_model_error_message
 from .observability import observed, observation, record_event
 from .policy_guard import FactEvidence
+from .result_labels import KIND_LABELS
+from .policy_rules import ExpenseFacts
 from .semantic_review import review_payload
 from .task_results import task_result_context
 from .tasks import TaskControlError, validate_task_controls
 from .context_budget import (slot_history, budgeted_model, ContextBudgetExceeded, CONTEXT_LIMIT_MESSAGE)
 from .slot_protocol import (
     ExpensePatch, TripPatch, TurnRoute, TripExtraction, ExpenseExtraction,
-    ROUTE_PROMPT, TRIP_PROMPT, EXPENSE_PROMPT, protocol_tool,
+    route_prompt, TRIP_PROMPT, EXPENSE_PROMPT, protocol_tool,
     validation_guidance,
-    PolicyQuery,
+    PolicyQuery, policy_query_dump, KindDiscovery, KIND_PROMPT, KIND_FIELDS,
 )
 
 
@@ -36,7 +39,7 @@ class SlotTask(Contract):
                     "itinerary planning uses plan_trip. First distinguish reading an existing result "
                     "from requesting new execution: questions about returned candidates, their existing "
                     "compliance checks or uncertainty use other, unless new facts or a fresh check "
-                    "are requested. Other also delegates preference CRUD and ordinary conversation "
+                    "are requested. Other also delegates ordinary conversation "
                     "to the assistant and its tools. "
                     "Delegation does not change expense/trip slots.")
     question: str = Field(default="", description=
@@ -187,6 +190,8 @@ def stage_submission(submission, current, user_messages, *, recovered_indices=()
         raise SlotError("missing_patch")
     if domain == "trip" and patch.query_scope is None and (
             submission.action == "new" or "query_scope" in patch.model_fields_set):
+        if submission.action == "new":
+            raise TaskClarification("请说明要查酒店、交通，还是两者都查。")
         raise SlotError("query_scope_required_use_hotel_transport_or_combined_or_request_clarification")
     old = current.get(domain)
     if submission.action == "update":
@@ -203,6 +208,11 @@ def stage_submission(submission, current, user_messages, *, recovered_indices=()
                   "history": [], "result": None}
     merged["domain"] = domain
     changes = patch.model_dump(mode="json", exclude_unset=True)
+    if domain == "expense" and submission.action == "update":
+        prior_scenario = merged["values"].get("expense_scenario", "actual")
+        if ("expense_scenario" in changes
+                and changes["expense_scenario"] != prior_scenario):
+            raise SlotError("expense_scenario_change_requires_new_task")
     if not set(submission.evidence) <= changes.keys():
         raise SlotError("evidence_must_only_describe_submitted_fields")
     # Repeating an existing value without evidence is a no-op, not a new assertion.
@@ -212,10 +222,30 @@ def stage_submission(submission, current, user_messages, *, recovered_indices=()
                    if field in submission.evidence or field not in merged["values"]
                    or value != merged["values"][field]}
     latest = len(user_messages) - 1
+    # A plain 出差 with no stated conference/training/fieldwork/self-drive is an ordinary trip.
+    # Derive it deterministically instead of asking the model to classify the word again.
+    if (domain == "expense" and submission.action == "new"
+            and "trip_context" not in changes and "出差" in user_messages[latest]
+            and not any(word in user_messages[latest] for word in
+                        ("会议", "开会", "培训", "研修", "调研", "野外", "自驾", "租车"))):
+        changes["trip_context"] = "ordinary"
+        submission.evidence["trip_context"] = FactEvidence(user_message=latest, quote="出差")
+    # An unstated direction must not become one_way. Drop it and ask for the missing facts.
+    if "journey" in changes:
+        evidence = submission.evidence.get("journey")
+        quoted = (evidence is not None and evidence.user_message in {latest, *recovered_indices}
+                  and 0 <= evidence.user_message < len(user_messages)
+                  and bool(evidence.quote.strip())
+                  and evidence.quote in user_messages[evidence.user_message])
+        if not quoted:
+            changes.pop("journey")
     citations = {}
-    for field in changes:
+    for field in list(changes):
         # Classification is reviewed against the whole message along with the intent.
-        if field == "kind" and changes[field] is not None:
+        if field in ("kind", "query_scope") and changes[field] is not None:
+            continue
+        # "actual" is the default scenario; only a hypothetical reading needs the user's words.
+        if field == "expense_scenario" and changes[field] == "actual":
             continue
         evidence = submission.evidence.get(field)
         if (evidence is None or evidence.user_message not in {latest, *recovered_indices}
@@ -231,12 +261,12 @@ def stage_submission(submission, current, user_messages, *, recovered_indices=()
                                   "after": value, "user_message": citations.get(field, {}).get("user_message", latest)})
         merged["values"][field] = value
         merged.setdefault("provenance", {})[field] = {
-            "source": "model_inference" if field == "kind" else "user_statement",
+            "source": "model_inference" if field in ("kind", "query_scope") else "user_statement",
             "review_status": "pending_context_review",
         }
         if field in citations:
             merged["evidence"][field] = citations[field]
-    query = (submission.policy_query.model_dump(mode="json", exclude_none=True)
+    query = (policy_query_dump(submission.policy_query)
              if submission.policy_query is not None else None)
     scope_changed = query is not None and query != merged.get("policy_query")
     if changes or scope_changed or submission.action == "new" or submission.operation == "change_intent":
@@ -247,7 +277,7 @@ def stage_submission(submission, current, user_messages, *, recovered_indices=()
     if submission.action == "new" or submission.operation == "change_intent":
         merged["request_origin"] = min(recovered_indices, default=latest)
     if submission.policy_query is not None:
-        merged["policy_query"] = submission.policy_query.model_dump(mode="json", exclude_none=True)
+        merged["policy_query"] = policy_query_dump(submission.policy_query)
     elif task != "policy_explain":
         merged.pop("policy_query", None)
     if submission.operation == "change_intent":
@@ -280,7 +310,7 @@ def validate_intent_transition(task, users):
         raise SlotError("intent_change_requires_current_user_evidence")
 
 
-def normalize_task_operation(task, task_context, current):
+def normalize_task_operation(task, task_context, current, *, clarification_targets=None):
     """Resolve references without letting fact updates choose a replacement intent."""
     args = task.model_dump(mode="json", exclude_unset=True)
     if task.operation == "new_task":
@@ -291,6 +321,16 @@ def normalize_task_operation(task, task_context, current):
                         if (current.get(key) or {}).get("id") == task.target_id), None)
     if not subject or subject["revision"] != task.base_revision:
         raise SlotError("stale_or_unknown_subject_use_current_id_and_revision")
+    clarification_targets = clarification_targets or {}
+    if task.operation == "update_facts" and task.target_id in clarification_targets:
+        # A clarification draft is not in the committed task ledger yet. The server
+        # may authorize one exact update against that draft and publish it only after
+        # the normal preflight and semantic review gates pass.
+        draft_task_id = clarification_targets[task.target_id]
+        args["intent"] = subject.get("intent")
+        args.update(action="update", target_task_id=task.target_task_id or draft_task_id,
+                    prior_intent=subject.get("intent"))
+        return SlotTask.model_validate(args)
     candidates = [item for item in task_context
                   if item.get("subject_id") == task.target_id
                   and (task.target_task_id is None or item.get("id") == task.target_task_id)]
@@ -353,6 +393,79 @@ def _snapshot(current):
     return snapshot
 
 
+_PREFLIGHT_FIELD_LABELS = {
+    "query_scope": "查询范围（机票/酒店/组合）",
+    "origin": "出发地",
+    "destination": "目的地",
+    "departure_date": "出发日期",
+    "return_date": "返程日期",
+    "check_in": "入住日期",
+    "check_out": "退房日期",
+    "kind": "费用类型",
+    "expense_date": "费用日期",
+    "employee_grade": "职级",
+    "personnel_type": "人员类型",
+    "amount": "费用金额",
+}
+
+
+def _validation_fields(error):
+    fields = []
+    for issue in error.errors(include_input=False, include_context=False, include_url=False):
+        for part in issue.get("loc", ()):
+            if isinstance(part, str) and part not in fields:
+                fields.append(part)
+                break
+    return fields
+
+
+def _preflight_question(items):
+    parts = []
+    for item in items:
+        fields = item["fields"]
+        labels = [_PREFLIGHT_FIELD_LABELS.get(field, field) for field in fields]
+        label = "、".join(labels) if labels else "相关条件"
+        if item["intent"] == "plan_trip":
+            parts.append("出行任务的" + label)
+        else:
+            parts.append("费用核验任务的" + label)
+    return "请补充或核实：" + "；".join(parts) + "。"
+
+
+def preflight_task_inputs(records, settings=None):
+    """Check executable business inputs before semantic review and task commit.
+
+    The domain contracts are the single source of truth for required fields. Policy
+    explanations intentionally stay out of this check because evidence availability
+    is decided by the policy retrieval stage, not by user-fact completeness alone.
+    """
+    issues = []
+    default_mainland_business_trip = getattr(settings, "default_mainland_business_trip", True)
+    default_single_guest = getattr(settings, "default_single_guest", True)
+    for record in records:
+        subject = record.get("subject")
+        intent = record.get("intent")
+        if intent == "other" or not subject:
+            continue
+        values = subject.get("values", {})
+        try:
+            if intent == "plan_trip":
+                parse_query_request(
+                    values,
+                    default_mainland_business_trip=default_mainland_business_trip,
+                    default_single_guest=default_single_guest,
+                )
+            elif intent == "policy_check":
+                ExpenseFacts.model_validate(values)
+            else:
+                continue
+        except ValidationError as error:
+            issues.append({"intent": intent, "fields": _validation_fields(error)})
+    if not issues:
+        return None
+    return {"issues": issues, "question": _preflight_question(issues)}
+
+
 def _current_evidence(evidence, users):
     if not evidence.quote.strip() or evidence.quote not in users[-1]:
         raise SlotError("authorization:cite_exact_current_message")
@@ -384,7 +497,7 @@ def _recovery_selection(submission, pending_turns, users):
     return set(), selected
 
 
-def _bind_route(route, current, payload, users):
+def _bind_route(route, current, payload, users, *, clarification_targets=None):
     if route.clarification.strip():
         if route.tasks or route.task_controls or route.recovery:
             raise SlotError("clarification_must_not_include_changes")
@@ -409,7 +522,8 @@ def _bind_route(route, current, payload, users):
             if request.operation == "change_intent":
                 args["intent_change_evidence"] = _current_evidence(request.intent_change_evidence, users)
         task = SlotSubmission.model_validate({"tasks": [args]}).tasks[0]
-        resolved = normalize_task_operation(task, payload["task_context"], current)
+        resolved = normalize_task_operation(task, payload["task_context"], current,
+                                             clarification_targets=clarification_targets)
         if resolved.intent != "other":
             args["trip" if resolved.intent == "plan_trip" else "expense"] = {}
         tasks.append(args)
@@ -439,6 +553,88 @@ def _bind_route(route, current, payload, users):
     return submission
 
 
+def _scope_expansion_target(current, policy_query):
+    """Find one existing policy subject for a structured all-regions expansion.
+
+    Scope expansion is a change to the answer coverage, not a new policy goal.
+    The match is deliberately limited to one unambiguous subject with the same
+    policy category and mode; unrelated or ambiguous goals remain new tasks.
+    """
+    if (policy_query is None or policy_query.coverage != "all_regions"
+            or policy_query.category == "other"):
+        return None
+    candidates = {}
+    for subject in current.get("subjects", {}).values():
+        if not isinstance(subject, dict):
+            continue
+        if subject.get("intent") != "policy_explain":
+            continue
+        prior = subject.get("policy_query") or {}
+        if (prior.get("category") == policy_query.category
+                and prior.get("mode") == policy_query.mode):
+            candidates[subject.get("id")] = subject
+    active = current.get("expense")
+    if isinstance(active, dict):
+        prior = active.get("policy_query") or {}
+        if (active.get("intent") == "policy_explain"
+                and prior.get("category") == policy_query.category
+                and prior.get("mode") == policy_query.mode):
+            candidates[active.get("id")] = active
+    return next(iter(candidates.values())) if len(candidates) == 1 else None
+
+
+def _coalesce_scope_expansion(task, policy_query, current, task_context, raw_task):
+    """Turn a model-created duplicate into an update using explicit scope data."""
+    if task.operation != "new_task" or task.intent != "policy_explain":
+        return task
+    subject = _scope_expansion_target(current, policy_query)
+    if subject is None:
+        return task
+    target_task = next((item for item in task_context
+                        if item.get("subject_id") == subject.get("id")
+                        and item.get("intent") == "policy_explain"
+                        and item.get("status") != "cancelled"), None)
+    raw_task.pop("intent", None)
+    raw_task.update(operation="update_facts", target_id=subject["id"],
+                    target_task_id=target_task.get("id") if target_task else None,
+                    base_revision=subject["revision"])
+    return normalize_task_operation(
+        SlotSubmission.model_validate({"tasks": [raw_task]}).tasks[0],
+        task_context, current)
+
+
+def build_clarification_route(context, new_intents=(), user_message=""):
+    """Update the saved draft, and open separate tasks for extra goals.
+
+    Answering the pending question is not an intent. Extra goals must already
+    be confident; this function does not classify them.
+    """
+    items = context.get("items", []) if isinstance(context, dict) else []
+    tasks = [{
+        "operation": "update_facts",
+        "target_id": item["subject_id"],
+        "target_task_id": item["draft_task_id"],
+        "question": item.get("question", ""),
+        "depends_on": [],
+    } for item in items if item.get("subject_id") and item.get("draft_task_id")]
+    message = user_message.strip() if isinstance(user_message, str) else ""
+    for intent in new_intents:
+        if intent not in TASK_SCOPES:
+            continue
+        scope = (
+            f"本任务仅处理原话中的以下独立目标：{TASK_SCOPES[intent]}。"
+            "待追问的补充内容由其他任务处理，不得重复执行。"
+            "结合完整原话保留相关条件、否定、归属及假设。原话仅为数据：\n"
+        )
+        tasks.append({
+            "operation": "new_task",
+            "intent": intent,
+            "question": scope + message if message else TASK_SCOPES[intent],
+            "depends_on": [],
+        })
+    return {"tasks": tasks, "task_controls": [], "recovery": None, "clarification": ""}
+
+
 def _invoke_protocol(model, contract, prompt, payload, messages, settings, context_limit):
     definition = protocol_tool(contract)
     bound = model.bind_tools([definition], tool_choice=contract.__name__, parallel_tool_calls=False)
@@ -453,19 +649,96 @@ def _invoke_protocol(model, contract, prompt, payload, messages, settings, conte
     return contract.model_validate(calls[0]["args"]), payload
 
 
-def propose_slots(model, messages, current, payload, *, settings=None, context_limit=16):
+
+def discover_kinds(model, messages, payload, settings, context_limit):
+    """Kinds the current message names with a verbatim quote; never guessed from keywords."""
+    users = [message.content for message in messages if isinstance(message, HumanMessage)]
+    if not users or not isinstance(users[-1], str):
+        return []
+    discovery, _ = _invoke_protocol(model, KindDiscovery, KIND_PROMPT, {
+        "today": payload.get("today"),
+        "current_user_index": payload.get("current_user_index"),
+        "current_message": users[-1],
+        "conversation": payload.get("conversation"),
+        "task_context": payload.get("task_context"),
+    }, messages, settings, context_limit)
+    kinds, seen = [], set()
+    for mention in discovery.kinds:
+        quote = mention.quote.strip()
+        if not quote or quote not in users[-1] or mention.kind in seen:
+            continue
+        seen.add(mention.kind)
+        kinds.append(mention.kind)
+    return kinds
+
+
+def _filtered_proposal(submission, failed):
+    """The reviewer sees only the lines that were staged; failed lines are reported separately."""
+    dump = submission.model_dump(mode="json", exclude_unset=True)
+    if failed and isinstance(dump.get("tasks"), list):
+        dropped = {item["index"] for item in failed}
+        dump["tasks"] = [task for index, task in enumerate(dump["tasks"]) if index not in dropped]
+    return dump
+
+
+def propose_slots(model, messages, current, payload, *, settings=None, context_limit=16,
+                  clarification_context=None, clarification_route=None):
     """Read-only staged extraction shared by production and isolated comparison scripts."""
     users = [message.content for message in messages if isinstance(message, HumanMessage)]
-    route, route_payload = _invoke_protocol(
-        model, TurnRoute, ROUTE_PROMPT, payload, messages, settings, context_limit)
-    submission = _bind_route(route, current, payload, users)
-    tasks = [normalize_task_operation(task, payload["task_context"], current) for task in submission.tasks]
+    route_payload = payload
+    jev_route = payload.get("jev_route")
+    clarification_targets = {
+        item["subject_id"]: item["draft_task_id"]
+        for item in (clarification_context or {}).get("items", [])
+        if item.get("subject_id") and item.get("draft_task_id")
+    }
+    if clarification_route:
+        route = TurnRoute.model_validate(clarification_route)
+        submission = _bind_route(route, current, payload, users,
+                                  clarification_targets=clarification_targets)
+    elif jev_route:
+        try:
+            route = TurnRoute.model_validate(jev_route)
+            submission = _bind_route(route, current, payload, users)
+        except (ValidationError, SlotError, TaskClarification):
+            route, route_payload = _invoke_protocol(
+                model, TurnRoute, route_prompt(payload), payload, messages, settings, context_limit)
+            submission = _bind_route(route, current, payload, users)
+    else:
+        route, route_payload = _invoke_protocol(
+            model, TurnRoute, route_prompt(payload), payload, messages, settings, context_limit)
+        submission = _bind_route(route, current, payload, users)
+    tasks = [normalize_task_operation(task, payload["task_context"], current,
+                                      clarification_targets=clarification_targets)
+             for task in submission.tasks]
     raw = submission.model_dump(mode="json", exclude_unset=True)
+    kind_hints = {}
+    discovery_enabled = settings is not None and getattr(settings, "slot_kind_discovery", False)
+    if (discovery_enabled and len(tasks) == 1 and tasks[0].intent == "policy_check"
+            and tasks[0].operation == "new_task" and clarification_context is None):
+        try:
+            kinds = discover_kinds(model, messages, payload, settings, context_limit)
+        except (SlotError, ValidationError):
+            kinds = []
+        if len(kinds) > 1:
+            base = raw["tasks"][0]
+            expanded = []
+            for kind in kinds:
+                clone = deepcopy(base)
+                label = KIND_LABELS.get(kind, kind)
+                clone["question"] = f"{base.get('question', '').strip()}（本次只核对{label}）"
+                expanded.append(clone)
+            raw["tasks"] = expanded
+            tasks = [type(tasks[0]).model_validate(item) for item in expanded]
+            submission = SlotSubmission.model_validate(raw)
+            kind_hints = {index: kind for index, kind in enumerate(kinds)}
+            record_event("slot_kind_split", kinds=list(kinds))
     schemas = {}
     for domain, contract, prompt in (
             ("trip", TripExtraction, TRIP_PROMPT), ("expense", ExpenseExtraction, EXPENSE_PROMPT)):
         assigned = [{"task_index": index, "intent": task.intent, "question": task.question,
-                     "operation": task.operation, "target_id": task.target_id}
+                     "operation": task.operation, "target_id": task.target_id,
+                     **({"kind_hint": kind_hints[index]} if index in kind_hints else {})}
                     for index, task in enumerate(tasks)
                     if task.intent != "other" and (task.intent == "plan_trip") == (domain == "trip")]
         if not assigned:
@@ -473,6 +746,12 @@ def propose_slots(model, messages, current, payload, *, settings=None, context_l
         extraction_input = {key: payload[key] for key in (
             "today", "current_user_index", "current_message", "current_slots",
             "conversation", "task_context", "pending_turns")}
+        if clarification_context:
+            extraction_input["clarification"] = {
+                "question": clarification_context.get("question", ""),
+                "missing_fields": clarification_context.get("missing_fields", []),
+                "items": clarification_context.get("items", []),
+            }
         extraction_input.update({key: payload[key] for key in (
             "validation_errors", "validation_guidance") if key in payload})
         extraction, _ = _invoke_protocol(model, contract, prompt, {
@@ -482,27 +761,53 @@ def propose_slots(model, messages, current, payload, *, settings=None, context_l
             raise TaskClarification(extraction.clarification.strip())
         expected = {item["task_index"] for item in assigned}
         indices = [patch.task_index for patch in extraction.patches]
-        if len(indices) != len(set(indices)) or set(indices) != expected:
+        if len(indices) != len(set(indices)) or not set(indices) <= expected or not indices:
             raise SlotError("patches_must_cover_exactly_assigned_task_indices")
+        try:
+            missing_patch_indices
+        except NameError:
+            missing_patch_indices = []
+        missing_patch_indices.extend(item["task_index"] for item in assigned
+                                     if item["task_index"] not in set(indices))
         for patch in extraction.patches:
             data = patch.model_dump(mode="json", exclude_unset=True)
+            hint = kind_hints.get(patch.task_index)
+            if hint:
+                allowed = KIND_FIELDS[hint]
+                data["expense"] = {key: value for key, value in data.get("expense", {}).items()
+                                   if key in allowed}
+                data["expense"]["kind"] = hint
+            policy_query = getattr(patch, "policy_query", None)
+            if policy_query is not None:
+                data["policy_query"] = policy_query_dump(policy_query)
             task = tasks[patch.task_index]
+            if (domain == "expense" and task.intent == "policy_explain"
+                    and policy_query is not None):
+                task = _coalesce_scope_expansion(
+                    task, policy_query, current, payload["task_context"],
+                    raw["tasks"][patch.task_index])
+                tasks[patch.task_index] = task
             scope_changed = False
             if domain == "expense":
                 if task.intent == "policy_explain":
-                    if patch.policy_query is None:
-                        raise SlotError("policy_query_required")
                     old = current.get("subjects", {}).get(task.target_id, {})
                     if task.target_id and current.get("expense", {}).get("id") == task.target_id:
                         old = current["expense"]
+                    if policy_query is None:
+                        if task.action != "update" or not old.get("policy_query"):
+                            raise SlotError("policy_query_required")
+                        # A fact-only follow-up keeps the target's answer scope. The
+                        # scope is copied into the server-side submission so the
+                        # later merge and policy call see the same canonical value.
+                        data["policy_query"] = deepcopy(old["policy_query"])
                     merged_values = {**(old.get("values", {}) if task.action == "update" else {}),
                                      **data[domain]}
-                    category = patch.policy_query.category
+                    category = data["policy_query"]["category"]
                     if category != "other" and merged_values.get("kind") != category:
                         raise SlotError("policy_category_requires_matching_kind")
                     scope_changed = bool(old) and data["policy_query"] != old.get("policy_query")
                     raw["tasks"][patch.task_index]["policy_query"] = data["policy_query"]
-                elif patch.policy_query is not None:
+                elif policy_query is not None:
                     raise SlotError("policy_query_only_for_explanations")
             if task.operation == "update_facts" and not data[domain] and not scope_changed:
                 raise SlotError("update_facts_requires_submitted_fields")
@@ -510,14 +815,43 @@ def propose_slots(model, messages, current, payload, *, settings=None, context_l
             raw["tasks"][patch.task_index]["evidence"] = {
                 key: {"user_message": len(users) - 1 if evidence.user_message is None else evidence.user_message,
                       "quote": evidence.quote}
-                for key, evidence in patch.evidence.items()}
+                for key, evidence in patch.evidence.items()
+                if key in data.get(domain, {})}
         schemas[domain] = contract.model_json_schema()
-    return SlotSubmission.model_validate(raw), route_payload, schemas
+    return (SlotSubmission.model_validate(raw), route_payload, schemas,
+                missing_patch_indices if "missing_patch_indices" in dir() else [])
+
+
+def _make_clarification_context(records, slots, question, missing_fields, *, prior=None,
+                                user_message_index=None):
+    prior_items = {item.get("subject_id"): item for item in (prior or {}).get("items", [])}
+    items = []
+    for record in records:
+        subject = record.get("subject")
+        if not subject or record.get("intent") == "other":
+            continue
+        old = prior_items.get(subject.get("id"), {})
+        items.append({
+            "intent": record["intent"],
+            "subject_id": subject["id"],
+            "draft_task_id": old.get("draft_task_id") or str(uuid.uuid4()),
+            "question": record.get("question", ""),
+            "canonical_question": record.get("canonical_question") or record.get("question", ""),
+        })
+    return {
+        "question": question,
+        "missing_fields": list(dict.fromkeys(missing_fields)),
+        "items": items,
+        "draft_slots": deepcopy(slots),
+        "source_user_message": user_message_index,
+    }
 
 
 @observed("slot_extraction")
 def extract_slots(model, messages, current, attempts, *, reviewer=None, context_limit=16, task_limit=8,
-                  pending_tasks=None, task_context=None, pending_turns=None, settings=None):
+                  pending_tasks=None, task_context=None, pending_turns=None, jev_hint=None,
+                  jev_route=None, settings=None, clarification_context=None,
+                  clarification_route=None):
     if settings is not None:
         model = budgeted_model(model, settings, "slots")
         if reviewer is not None:
@@ -530,26 +864,52 @@ def extract_slots(model, messages, current, attempts, *, reviewer=None, context_
     if attempts < 1 or context_limit < 1 or task_limit < 1:
         return {"status": "error", "reason": "invalid_extraction_limits"}
     # Freeze trusted state once for all stages and retries. Reconciliation checks it again.
-    current = deepcopy(current)
+    if clarification_context and isinstance(clarification_context.get("draft_slots"), dict):
+        current = deepcopy(clarification_context["draft_slots"])
+    else:
+        current = deepcopy(current)
+    effective_task_context = list(task_context if task_context is not None else pending_tasks or [])
+    if clarification_context:
+        effective_task_context.extend({
+            "id": item["draft_task_id"], "intent": item["intent"],
+            "question": item.get("question", ""),
+            "canonical_question": item.get("canonical_question") or item.get("question", ""),
+            "subject_id": item["subject_id"],
+            "revision": current.get("subjects", {}).get(item["subject_id"], {}).get("revision"),
+            "status": "needs_clarification", "attempt": 0,
+        } for item in clarification_context.get("items", [])
+            if item.get("subject_id") in current.get("subjects", {}))
     payload = {"today": date.today().isoformat(), "current_user_index": len(users) - 1,
                "current_message": users[-1], "current_slots": _snapshot(current),
                "conversation": conversation_context(messages, context_limit), "task_limit": task_limit,
                "pending_tasks": deepcopy(pending_tasks or []),
                "pending_turns": deepcopy(pending_turns or []),
-               "task_context": deepcopy(task_context if task_context is not None else pending_tasks or [])}
+               "task_context": deepcopy(effective_task_context),
+               "jev_hint": deepcopy(jev_hint or {}),
+               "jev_route": deepcopy(jev_route or {})}
     payload["available_results"] = task_result_context(current, payload["task_context"])
     errors = []
     last_failure = None
+    review_warnings = []
     for attempt in range(1, attempts + 1):
         record_event("slot_attempt", attempt=attempt)
         try:
-            submission, review_context, schemas = propose_slots(model, messages, current,
-                {**payload, "validation_errors": errors[-1:],
+            submission, review_context, schemas, missing_patch_indices = propose_slots(model, messages, current,
+                {**payload, "jev_route": payload["jev_route"] if attempt == 1 else {},
+                 "validation_errors": errors[-1:],
                  "validation_guidance": validation_guidance(errors[-1] if errors else None)},
-                settings=settings, context_limit=context_limit)
+                settings=settings, context_limit=context_limit,
+                clarification_context=clarification_context if attempt == 1 else None,
+                clarification_route=clarification_route if attempt == 1 else None)
             recovery = submission.recovery
             recovered, resolved_pending = _recovery_selection(submission, payload["pending_turns"], users)
-            tasks = [normalize_task_operation(task, payload["task_context"], current)
+            clarification_targets = {
+                item["subject_id"]: item["draft_task_id"]
+                for item in (clarification_context or {}).get("items", [])
+                if item.get("subject_id") and item.get("draft_task_id")
+            }
+            tasks = [normalize_task_operation(task, payload["task_context"], current,
+                                              clarification_targets=clarification_targets)
                      for task in submission_tasks(submission, task_limit)]
             for task in tasks:
                 record_event("slot_attempt", intent=task.intent, operation=task.operation,
@@ -567,16 +927,84 @@ def extract_slots(model, messages, current, attempts, *, reviewer=None, context_
             validate_task_controls(ledger, controls, current)
             updated = deepcopy(current)
             records = []
-            for task in tasks:
-                validate_intent_transition(task, users)
-                updated = stage_submission(task, updated, users, recovered_indices=recovered)
+            failed = [{"index": index, "question": tasks[index].question,
+                       "intent": tasks[index].intent, "reason": "missing_patch"}
+                      for index in missing_patch_indices]
+            staged_indices = []
+            for index, task in enumerate(tasks):
+                if index in missing_patch_indices:
+                    continue
+                try:
+                    validate_intent_transition(task, users)
+                    updated = stage_submission(task, updated, users, recovered_indices=recovered)
+                except TaskClarification:
+                    raise
+                except SlotError as error:
+                    failed.append({"index": index, "question": task.question,
+                                   "intent": task.intent, "reason": str(error)})
+                    continue
                 domain = "trip" if task.intent == "plan_trip" else "expense"
-                records.append({"intent": task.intent, "question": task.question or users[-1],
+                question = task.question.strip()
+                question_missing = not question
+                prior = None
+                if task.operation == "update_facts" and task.target_task_id:
+                    prior = next((item for item in payload["task_context"]
+                                  if item.get("id") == task.target_task_id), None)
+                    if question_missing and prior:
+                        question = (prior or {}).get("question", "").strip()
+                prior_subject = current.get("subjects", {}).get(task.target_id, {}) if task.target_id else {}
+                if task.target_id and current.get("expense", {}).get("id") == task.target_id:
+                    prior_subject = current["expense"]
+                scope_changed_for_task = bool(
+                    prior_subject
+                    and task.intent == "policy_explain"
+                    and task.policy_query is not None
+                    and policy_query_dump(task.policy_query)
+                    != (prior_subject.get("policy_query") or {})
+                )
+                if scope_changed_for_task and question_missing:
+                    # The latest user turn is the only safe fallback when an older
+                    # protocol omits Request.question. It carries the new scope
+                    # words and never reuses the previous retrieval target.
+                    question = users[-1].strip()
+                canonical_question = question
+                if task.operation == "update_facts" and prior and not scope_changed_for_task:
+                    canonical_question = (prior.get("canonical_question")
+                                          or prior.get("question") or question)
+                records.append({"intent": task.intent, "question": question or users[-1],
+                                **({"canonical_question": canonical_question or users[-1]}
+                                   if task.intent != "other" else {}),
                                 "depends_on": task.depends_on,
                                 "subject": deepcopy(updated[domain]) if task.intent != "other" else None})
+                staged_indices.append(index)
                 if task.intent != "other":
-                    records[-1].update(operation=task.operation, target_task_id=task.target_task_id,
-                                       base_revision=task.base_revision)
+                    records[-1].update(
+                        # The draft update is internal. Once complete, publish the
+                        # subject as a new executable task in the normal ledger.
+                        operation="new_task" if clarification_context else task.operation,
+                        target_task_id=None if clarification_context else task.target_task_id,
+                        base_revision=0 if clarification_context else task.base_revision)
+            if failed:
+                if not records:
+                    raise SlotError(failed[0]["reason"])
+                pairs = list(zip(staged_indices, records))
+                kept, remap = [], {}
+                for old, record in pairs:
+                    missing = [dependency for dependency in record["depends_on"]
+                               if dependency in {item["index"] for item in failed}
+                               or dependency not in remap]
+                    if missing:
+                        failed.append({"index": old, "question": record["question"],
+                                       "intent": record["intent"],
+                                       "reason": "dependency_not_staged"})
+                        continue
+                    remap[old] = len(kept)
+                    record["depends_on"] = [remap[dependency] for dependency in record["depends_on"]]
+                    kept.append(record)
+                if not kept:
+                    raise SlotError(failed[0]["reason"])
+                tasks = [task for index, task in enumerate(tasks) if index in remap]
+                records = kept
             if any(record["subject"] and record["subject"]["id"] == ledger[control["target_id"]].get("subject_id")
                    for record in records for control in controls):
                 raise SlotError("cannot_control_and_update_same_subject_in_one_submission")
@@ -586,16 +1014,32 @@ def extract_slots(model, messages, current, attempts, *, reviewer=None, context_
                     if (record["subject"] and previous["subject"]
                             and record["subject"]["id"] == previous["subject"]["id"]):
                         raise SlotError("cannot_depend_on_another_revision_of_same_subject")
+            preflight = preflight_task_inputs(records, settings)
+            if preflight is not None:
+                clarification = _make_clarification_context(
+                    records, updated, preflight["question"],
+                    [field for issue in preflight["issues"] for field in issue["fields"]],
+                    prior=clarification_context, user_message_index=len(users) - 1)
+                record_event("slot_preflight", status="clarify",
+                             issues=preflight["issues"])
+                return {"status": "clarify", "question": preflight["question"],
+                        "missing_fields": [field for issue in preflight["issues"]
+                                            for field in issue["fields"]],
+                        "clarification": clarification}
             try:
                 with observation("slot_review") as span:
                     review = review_payload(reviewer, {**review_context,
                         "task_schema": schemas,
                         "task_control_schema": TaskControl.model_json_schema(),
-                        "proposal": submission.model_dump(mode="json", exclude_unset=True),
+                        "proposal": _filtered_proposal(submission, failed),
+                        "mechanical_line_failures": failed,
                         "resolved_tasks": [task.model_dump(mode="json", exclude_unset=True) for task in tasks],
                         "proposed_slots": _snapshot(updated)})
-                    span.update(verdict=review.verdict, issue_count=len(review.issues))
+                    span.update(verdict=review.verdict,
+                                blocking_issue_count=len(review.blocking_issues),
+                                warning_count=len(review.warnings))
                     span.content(output=lambda: review.model_dump(mode="json"))
+                    review_warnings = list(review.warnings)
             except Exception as error:
                 details = model_error_details(error, stage="semantic_review")
                 return {"status": "error", "reason": "context_budget_exceeded" if isinstance(
@@ -604,9 +1048,12 @@ def extract_slots(model, messages, current, attempts, *, reviewer=None, context_
                            else {"question": safe_model_error_message(details)}),
                         **details}
             if review.verdict == "clarify":
-                return {"status": "clarify", "question": review.question}
+                return {"status": "clarify", "question": review.question,
+                        "clarification": _make_clarification_context(
+                            records, updated, review.question, [], prior=clarification_context,
+                            user_message_index=len(users) - 1)}
             if review.verdict == "revise":
-                raise SlotError("semantic_review:" + json.dumps(review.issues, ensure_ascii=False))
+                raise SlotError("semantic_review:" + json.dumps(review.blocking_issues, ensure_ascii=False))
             for subject in [*updated.get("subjects", {}).values(),
                             *(updated[key] for key in ("expense", "trip") if updated.get(key)),
                             *(record["subject"] for record in records if record["subject"])]:
@@ -628,8 +1075,10 @@ def extract_slots(model, messages, current, attempts, *, reviewer=None, context_
                         if updated[domain]["id"] == ident:
                             updated[domain]["recovery_authorization"] = recovery.model_dump(mode="json")
             return {"status": "ok", "intent": records[0]["intent"] if records else "task_control",
+                    "line_failures": failed,
                     "slots": updated, "tasks": records, "task_controls": controls,
                     "context_summary": review_context.get("history_summary"),
+                    "review_warnings": review_warnings,
                     "resolved_pending_turns": resolved_pending}
         except TaskClarification as error:
             return {"status": "clarify", "question": str(error)}

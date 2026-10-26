@@ -11,8 +11,11 @@ from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import ValidationError
 
 from business_travel.graph import build_assistant
-from business_travel.slots import SlotError, SlotTask as SlotSubmission, extract_slots, stage_submission as merge_submission
+from business_travel.slots import (SlotError, SlotTask as SlotSubmission,
+                                    build_clarification_route, extract_slots,
+                                    stage_submission as merge_submission)
 from tests import test_travel_graph as fixtures
+from tests.test_slot_protocol import RawModel, reply
 from tests.test_travel_graph import FixtureProvider, ScriptedModel, call, slot_response, review_response
 
 
@@ -29,6 +32,48 @@ def reviewed_submission(submission, current, users, *, accepted):
 
 
 class SlotTests(unittest.TestCase):
+    def test_clarification_draft_is_reused_by_targeted_update_without_turn_route(self):
+        initial_route = {
+            "tasks": [{"operation": "new_task", "intent": "plan_trip",
+                       "question": "查南京酒店", "depends_on": []}],
+            "task_controls": [], "recovery": None, "clarification": "",
+        }
+        first_model = RawModel([
+            reply("TripExtraction", {"patches": [{"task_index": 0,
+                "trip": {"query_scope": "hotel", "destination": "南京"},
+                "evidence": {"query_scope": {"quote": "酒店"},
+                             "destination": {"quote": "南京"}}}]})
+        ])
+        first = extract_slots(first_model, [HumanMessage(content="查南京酒店")], {}, 1,
+                              reviewer=fixtures.ScriptedModel([review_response()]),
+                              jev_route=initial_route)
+        self.assertEqual(first["status"], "clarify", first)
+        self.assertEqual(first["missing_fields"], ["check_in", "check_out"])
+        clarification = first["clarification"]
+        self.assertEqual(clarification["items"][0]["intent"], "plan_trip")
+        self.assertIn("draft_slots", clarification)
+
+        followup_model = RawModel([
+            reply("TripExtraction", {"patches": [{"task_index": 0,
+                "trip": {"check_in": "2099-09-08", "check_out": "2099-09-09"},
+                "evidence": {"check_in": {"quote": "2099-09-08"},
+                             "check_out": {"quote": "2099-09-09"}}}]})
+        ])
+        followup = extract_slots(
+            followup_model,
+            [HumanMessage(content="查南京酒店"),
+             HumanMessage(content="2099-09-08入住，2099-09-09退房")],
+            {}, 1,
+            reviewer=fixtures.ScriptedModel([review_response()]),
+            clarification_context=clarification,
+            clarification_route=build_clarification_route(clarification),
+        )
+        self.assertEqual(followup["status"], "ok", followup)
+        self.assertEqual(followup["tasks"][0]["operation"], "new_task")
+        self.assertEqual(followup["tasks"][0]["subject"]["values"]["check_in"], "2099-09-08")
+        self.assertEqual(followup["tasks"][0]["subject"]["values"]["check_out"], "2099-09-09")
+        self.assertEqual(len(followup_model.calls), 1)
+
     def test_completed_goal_context_prevents_unattributed_intent_switch(self):
         current, users = self.initial()
         original = deepcopy(current)
@@ -175,12 +220,16 @@ class SlotTests(unittest.TestCase):
                 SlotSubmission(intent="policy_check", expense=expense)
 
     def test_explicit_date_verification_clause_can_support_short_citation(self):
-        patch = SlotSubmission(intent="policy_check", expense={"date_verified": True},
-                               evidence={"date_verified": {"user_message": 0, "quote": "2099-09-08"}})
-        current = reviewed_submission(patch, {}, ["2099-09-08价格和日期已核实"], accepted=True)
+        patch = SlotSubmission(intent="policy_check", expense={
+            "kind": "hotel", "expense_date": "2099-09-08", "destination": "上海",
+            "date_verified": True}, evidence={
+                "expense_date": {"user_message": 0, "quote": "2099-09-08"},
+                "destination": {"user_message": 0, "quote": "上海"},
+                "date_verified": {"user_message": 0, "quote": "2099-09-08"}})
+        current = reviewed_submission(patch, {}, ["2099-09-08上海住宿价格和日期已核实"], accepted=True)
         self.assertTrue(current["expense"]["values"]["date_verified"])
         with self.assertRaises(SlotError):
-            reviewed_submission(patch, {}, ["2099-09-08"], accepted=False)
+            reviewed_submission(patch, {}, ["2099-09-08上海住宿"], accepted=False)
 
     def test_chinese_month_day_inherits_current_year(self):
         state, _ = self.initial()
@@ -189,53 +238,133 @@ class SlotTests(unittest.TestCase):
         self.assertEqual(result["expense"]["values"]["expense_date"], "2099-09-10")
 
     def test_basis_short_quote_requires_explicit_same_clause_unit(self):
-        patch = SlotSubmission(intent="policy_check", expense={"basis": "room_night"},
-                               evidence={"basis": {"user_message": 0, "quote": "每间"}})
-        result = reviewed_submission(patch, {}, ["已核实该晚每间实际含税价600元人民币"], accepted=True)
+        patch = SlotSubmission(intent="policy_check", expense={
+            "kind": "hotel", "expense_date": "2099-09-08", "destination": "上海",
+            "basis": "room_night"}, evidence={
+                "expense_date": {"user_message": 0, "quote": "2099-09-08"},
+                "destination": {"user_message": 0, "quote": "上海"},
+                "basis": {"user_message": 0, "quote": "每间"}})
+        result = reviewed_submission(patch, {}, ["2099-09-08上海住宿已核实该晚每间实际含税价600元人民币"], accepted=True)
         self.assertEqual(result["expense"]["values"]["basis"], "room_night")
         with self.assertRaises(SlotError):
-            reviewed_submission(patch, {}, ["每间600元"], accepted=False)
+            reviewed_submission(patch, {}, ["2099-09-08上海住宿每间600元"], accepted=False)
 
     def test_grade_must_preserve_complete_cited_name(self):
         for field in ("employee_grade", "roommate_grade"):
-            evidence = {field: {"user_message": 0, "quote": "普通员工"}}
+            evidence = {
+                "expense_date": {"user_message": 0, "quote": "2099-09-09"},
+                "destination": {"user_message": 0, "quote": "上海"},
+                field: {"user_message": 0, "quote": "普通员工"},
+            }
             with self.assertRaises(SlotError):
-                reviewed_submission(SlotSubmission(intent="policy_check", expense={field: "普通"},
+                reviewed_submission(SlotSubmission(intent="policy_check", expense={
+                                                "kind": "hotel", "expense_date": "2099-09-09",
+                                                "destination": "上海", field: "普通"},
                                                 evidence=evidence), {}, ["两位普通员工"], accepted=False)
-            result = reviewed_submission(SlotSubmission(intent="policy_check", expense={field: "普通员工"},
-                                                     evidence=evidence), {}, ["两位普通员工"], accepted=True)
+            result = reviewed_submission(SlotSubmission(intent="policy_check", expense={
+                                                     "kind": "hotel", "expense_date": "2099-09-09",
+                                                     "destination": "上海", field: "普通员工"},
+                                                     evidence=evidence), {}, ["2099-09-09上海住宿两位普通员工"], accepted=True)
             self.assertEqual(result["expense"]["values"][field], "普通员工")
 
     def test_extraction_retries_omitted_explicit_date_and_overnight(self):
-        bad = {"intent": "policy_check", "expense": {"kind": "meal"}}
-        good = {"intent": "policy_check", "expense": {
-            "kind": "meal", "expense_date": "2099-09-08", "overnight_trip": True},
+        bad = {"intent": "policy_check", "expense": {
+            "kind": "meal", "expense_date": "2099-09-08", "destination": "上海"},
             "evidence": {key: {"user_message": 0, "quote": quote} for key, quote in {
-                "expense_date": "2099-09-08", "overnight_trip": "过夜"}.items()}}
+                "expense_date": "2099-09-08", "destination": "上海"}.items()}}
+        good = {"intent": "policy_check", "expense": {
+            "kind": "meal", "expense_date": "2099-09-08", "destination": "上海", "overnight_trip": True},
+            "evidence": {key: {"user_message": 0, "quote": quote} for key, quote in {
+                "expense_date": "2099-09-08", "destination": "上海", "overnight_trip": "过夜"}.items()}}
         model = ScriptedModel([call("SlotSubmission", bad, "bad"), call("SlotSubmission", good, "ok")])
-        result = extract_slots(model, [HumanMessage(content="2099-09-08出差过夜，核对伙食补助")], {}, 2,
+        result = extract_slots(model, [HumanMessage(content="2099-09-08上海出差过夜，核对伙食补助")], {}, 2,
             reviewer=ScriptedModel([review_response("revise", ["explicit date and overnight omitted"]),
                                     review_response()]))
         self.assertTrue(result["slots"]["expense"]["values"].get("overnight_trip"))
         self.assertEqual(result["slots"]["expense"]["values"]["expense_date"], "2099-09-08")
 
     def test_extraction_retries_omitted_explicit_tax_flag(self):
-        bad = {"intent": "policy_check", "expense": {"kind": "hotel"}}
-        good = {"intent": "policy_check", "expense": {"kind": "hotel", "taxes_confirmed": True},
-                "evidence": {"taxes_confirmed": {"user_message": 0, "quote": "含税"}}}
+        bad = {"intent": "policy_check", "expense": {
+            "kind": "hotel", "expense_date": "2099-09-08", "destination": "上海"},
+            "evidence": {key: {"user_message": 0, "quote": quote} for key, quote in {
+                "expense_date": "2099-09-08", "destination": "上海"}.items()}}
+        good = {"intent": "policy_check", "expense": {
+            "kind": "hotel", "expense_date": "2099-09-08", "destination": "上海",
+            "taxes_confirmed": True}, "evidence": {
+                "expense_date": {"user_message": 0, "quote": "2099-09-08"},
+                "destination": {"user_message": 0, "quote": "上海"},
+                "taxes_confirmed": {"user_message": 0, "quote": "含税"}}}
         model = ScriptedModel([call("SlotSubmission", bad, "bad"), call("SlotSubmission", good, "ok")])
-        result = extract_slots(model, [HumanMessage(content="住宿价含税")], {}, 2,
+        result = extract_slots(model, [HumanMessage(content="2099-09-08上海住宿价含税")], {}, 2,
             reviewer=ScriptedModel([review_response("revise", ["explicit tax flag omitted"]), review_response()]))
         self.assertTrue(result["slots"]["expense"]["values"]["taxes_confirmed"])
 
     def test_abbreviated_checkout_requires_unambiguous_explicit_month(self):
-        submission = SlotSubmission(intent="plan_trip", trip={"query_scope": "hotel", "check_out": "2099-09-11"},
-                                    evidence={"check_out": {"user_message": 0, "quote": "11日退房"},
-                                              "query_scope": {"user_message": 0, "quote": "入住"}})
-        result = reviewed_submission(submission, {}, ["2099-09-10出发，9月10日入住、11日退房"], accepted=True)
+        submission = SlotSubmission(intent="plan_trip", trip={
+            "query_scope": "hotel", "destination": "郑州", "check_in": "2099-09-10",
+            "check_out": "2099-09-11"}, evidence={
+                "query_scope": {"user_message": 0, "quote": "入住"},
+                "destination": {"user_message": 0, "quote": "郑州"},
+                "check_in": {"user_message": 0, "quote": "2099-09-10入住"},
+                "check_out": {"user_message": 0, "quote": "11日退房"}})
+        result = reviewed_submission(submission, {}, ["郑州2099-09-10入住、11日退房"], accepted=True)
         self.assertEqual(result["trip"]["values"]["check_out"], "2099-09-11")
         with self.assertRaises(SlotError):
-            reviewed_submission(submission, {}, ["2099-09-10出发，10月入住、11日退房"], accepted=False)
+            reviewed_submission(submission, {}, ["郑州2099-09-10入住、10月入住、11日退房"], accepted=False)
+
+    def test_missing_trip_fields_clarifies_before_review_or_task_commit(self):
+        model = ScriptedModel([call("SlotSubmission", {
+            "intent": "plan_trip",
+            "trip": {"query_scope": "hotel", "destination": "郑州"},
+            "evidence": {
+                "query_scope": {"user_message": 0, "quote": "酒店"},
+                "destination": {"user_message": 0, "quote": "郑州"},
+            },
+        }, "missing-trip")])
+        reviewer = ScriptedModel([review_response()])
+        result = extract_slots(model, [HumanMessage(content="帮我查郑州酒店")], {}, 1,
+                               reviewer=reviewer)
+        self.assertEqual(result["status"], "clarify")
+        self.assertIn("check_in", result["missing_fields"])
+        self.assertIn("check_out", result["missing_fields"])
+        self.assertNotIn("slots", result)
+        self.assertNotIn("tasks", result)
+        self.assertEqual(reviewer.messages, [])
+
+    def test_missing_expense_fields_clarifies_before_review_or_task_commit(self):
+        model = ScriptedModel([call("SlotSubmission", {
+            "intent": "policy_check",
+            "expense": {"kind": "hotel", "destination": "郑州"},
+            "evidence": {"destination": {"user_message": 0, "quote": "郑州"}},
+        }, "missing-expense")])
+        reviewer = ScriptedModel([review_response()])
+        result = extract_slots(model, [HumanMessage(content="核对郑州酒店费用")], {}, 1,
+                               reviewer=reviewer)
+        self.assertEqual(result["status"], "clarify")
+        self.assertIn("expense_date", result["missing_fields"])
+        self.assertNotIn("slots", result)
+        self.assertNotIn("tasks", result)
+        self.assertEqual(reviewer.messages, [])
+
+    def test_complete_trip_fields_still_run_semantic_review(self):
+        model = ScriptedModel([call("SlotSubmission", {
+            "intent": "plan_trip",
+            "trip": {"query_scope": "hotel", "destination": "郑州",
+                      "check_in": "2099-09-10", "check_out": "2099-09-11"},
+            "evidence": {
+                "query_scope": {"user_message": 0, "quote": "酒店"},
+                "destination": {"user_message": 0, "quote": "郑州"},
+                "check_in": {"user_message": 0, "quote": "2099-09-10"},
+                "check_out": {"user_message": 0, "quote": "2099-09-11"},
+            },
+        }, "complete-trip")])
+        reviewer = ScriptedModel([review_response()])
+        result = extract_slots(
+            model, [HumanMessage(content="查郑州酒店，2099-09-10至2099-09-11")], {}, 1,
+            reviewer=reviewer)
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(len(reviewer.messages), 1)
+        self.assertIn("郑州", result["slots"]["trip"]["values"]["destination"])
 
     def test_empty_update_invalidates_prior_result_before_recheck(self):
         state, users = self.initial()

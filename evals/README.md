@@ -7,7 +7,7 @@
 - `routing.jsonl`：路由、多事项拆分、槽位追问和更正。
 - `policy_rag.jsonl`：条款召回、引用连续性、结构化住宿规则和证据不足。
 - `tool_safety.jsonl`：工具白名单、Schema、调用门禁、失败和重试边界。
-- `memory_revision.jsonl`：短期检查点、长期偏好、用户隔离和 revision。
+- `memory_revision.jsonl`：事项版本失效和长期偏好功能已移除的回归。旧偏好 CRUD 案例已退出当前运行清单；历史报告保留。
 - `recovery_idempotency.jsonl`：失败上下文、显式恢复、幂等和旧结果失效。
 - `concurrency_budget.jsonl`：共享 API Key 场景下的并发槽位、队列、配额和请求预算。
 
@@ -48,6 +48,27 @@
 - `forbidden_behaviors`：不能出现的副作用，例如旧 revision 继续生效、失败后盲目重放。
 
 ## 离线执行
+
+## Jev 意图准确率评测
+
+`intent_accuracy_cases_100.jsonl` 是当前的100条人工标注意图测试集，覆盖四类意图、单意图、多意图、否定、假设、政策解释、费用核验以及保存/确认/修改/取消出差等 `other` 操作。原来的20条小样本保留在 `intent_accuracy_cases.jsonl`，可用于前后版本快速对比。
+
+脚本默认使用100条数据：
+
+```powershell
+.\.venv\Scripts\python.exe evals\intent_accuracy.py `
+  --output .verification\intent-accuracy-100.json
+```
+
+先跑少量样本确认接口和 Key：
+
+```powershell
+.\.venv\Scripts\python.exe evals\intent_accuracy.py `
+  --limit 5 `
+  --output .verification\intent-accuracy-smoke.json
+```
+
+需要把 Trace 和 `intent_exact_match` 分数写入 Langfuse 时，加上 `--langfuse`。准确率统计只针对有 Jev 正常返回的样本，接口不可用的样本会标记为 blocked，不会被当作错误分类。
 
 第一阶段 Runner 不调用真实模型、MCP、供应商或正式数据库，而是把每条 Case 映射到已有的确定性或合成回归测试并真实执行：
 
@@ -108,17 +129,9 @@ PostgreSQL 集成测试创建随机 `travel_resource_test_*` schema，只写合�
 
 这里观察的是空初态的实际模型表现，不是历史验收环境的重放；缺少的历史 checkpoint、故障注入和政策版本不会自动补造。每例 `scoring_status` 均为 `not_scored_pending_human_review`；`completed` 仅表示执行结束，不表示回答正确。中断、模型不可用和不能复现的前置条件须单独检查。输入和回答保存在本机，不自动上传 Langfuse 或晋升正式 gold。
 
-## 真实 Agent 记忆开发试跑与语义 Judge
+## 长期偏好评测已删除
 
-七条合成单轮记忆案例可用真实 `build_assistant` 和真实模型执行，隔离临时记忆、内存 checkpoint，并拒绝真实差旅供应商调用；这**不是** Web 端到端或全部 88 条候选回放。先运行硬断言实验，再对同一份运行报告的实际回复独立评分：
-
-```powershell
-.\.venv\Scripts\python.exe -m evals.langfuse_memory --run --output .verification\memory-real-<unique>.json
-.\.venv\Scripts\python.exe -m evals.judge_memory --report .verification\memory-real-<unique>.json --output .verification\memory-judge-<unique>.json
-.\.venv\Scripts\python.exe -m unittest tests.test_judge_memory
-```
-
-Judge 的 `memory_answer_fidelity_v3` 仅评回复是否如实、清楚描述实际持久化状态（0 错误、1 含糊、2 忠实）；`memory_contract` 是独立硬断言。**不得平均这两项或用语义高分覆盖硬失败**。评测结果是待审核的开发数据，不是正式准确率。输出含合成问答，请勿将真实用户内容混入数据集；输出文件名须唯一以保留历史实验。
+长期偏好保存、快照和对应 Judge 已从当前产品移除。历史实验报告保留，不再提供可执行入口。
 
 1. 先做离线协议评测：解析 JSONL，运行确定性状态机和工具门禁断言。
 2. 再做合成模型评测：固定模型输出，检查路由、Schema、revision、调用次数和失败分支。

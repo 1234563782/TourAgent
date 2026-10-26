@@ -20,7 +20,12 @@ from business_travel.memory import TravelMemory
 from business_travel.models import create_model, model_error_details
 from business_travel.policy import PolicyStore
 from business_travel.settings import Settings
-from scripts.verify_preference_dialogues import UnavailableProvider
+class UnavailableProvider:
+    def search(self, *args, **kwargs):
+        raise RuntimeError("供应商不在本次验收范围内")
+
+    def weather(self, *args, **kwargs):
+        raise RuntimeError("天气不在本次验收范围内")
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,7 +45,7 @@ def load_candidates(path):
     return rows, hashlib.sha256(raw).hexdigest()
 
 
-def describe_turn(state, memory):
+def describe_turn(state):
     error = state.get("slot_error") or {}
     messages = state.get("messages", [])
     tool_calls = [message.name for message in messages if isinstance(message, ToolMessage)]
@@ -70,7 +75,6 @@ def describe_turn(state, memory):
         ],
         "tool_calls_seen": tool_calls,
         "tool_statuses_seen": tool_statuses,
-        "preference_count": len(memory.preference_snapshot()["items"]),
     }
 
 
@@ -99,7 +103,7 @@ def execute_candidate(row, settings, policy):
                 break
             try:
                 state = graph.invoke({"messages": [HumanMessage(content=content)]}, config)
-                observed = describe_turn(state, memory)
+                observed = describe_turn(state)
             except Exception as error:
                 details = model_error_details(error)
                 code = details["failure_code"]

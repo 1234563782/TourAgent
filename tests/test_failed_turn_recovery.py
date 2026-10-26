@@ -209,7 +209,7 @@ class FailedTurnRecoveryTests(unittest.TestCase):
         result = graph.invoke({"messages": [HumanMessage("重试")]}, self.config)
         self.assertIn("recovery_business_facts_only", str(result["slot_error"]))
         self.assertEqual(result["slots"], first["slots"])
-        self.assertEqual(self.memory.read()["preferences"], [])
+        self.assertNotIn("preferences", self.memory.read())
 
     def test_second_outage_keeps_original_pending_turn_available(self):
         graph = self.build([self.initial(), unavailable, unavailable, self.recover])

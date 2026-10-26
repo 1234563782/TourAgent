@@ -282,9 +282,6 @@ async function reviewRecovery() {
     byId("recovery-source").textContent = review.recovery ? "" : review.source_checkpoint_id
       ? `继承最近完整历史中的 ${review.history_message_count} 条消息。`
       : "没有可继承的完整轮次，将建立空白恢复对话。";
-    byId("recovery-preferences").textContent = review.recovery ? "已核实" :
-      review.preferences.items.length ? review.preferences.items.map((item) =>
-        `${item.type}：${Array.isArray(item.value) ? item.value.join(" / ") : item.value}`).join("\n") : "暂无";
     byId("recovery-trips").textContent = review.recovery ? "已核实" :
       review.saved_trips.length ? JSON.stringify(review.saved_trips, null, 2) : "暂无";
     byId("recovery-reviewed").parentElement.hidden = Boolean(review.recovery);
@@ -368,7 +365,7 @@ function showLogin(text = "") {
   recoveryReview = null;
   recoveryBusy = false;
   byId("recovery-dialog").close();
-  ["recovery-notice", "recovery-source", "recovery-preferences", "recovery-trips"].forEach(
+  ["recovery-notice", "recovery-source", "recovery-trips"].forEach(
     (id) => { byId(id).textContent = ""; });
   conversationId = null;
   conversationKey = null;

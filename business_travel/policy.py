@@ -23,8 +23,25 @@ class PolicyStore:
     def check_candidate(self, candidate, trip):
         return check_candidate(candidate, trip, self.rules)
 
+    def resolve_planning_standards(self, trip):
+        """Local legacy policies do not expose identity-to-grade mappings."""
+        return trip
+
+    def recommendation_profile(self, trip):
+        """Return policy facts usable for recommendation ranking, if available."""
+        return {
+            "status": "unavailable",
+            "reason": "planning_policy_not_configured",
+            "transport_standard": trip.transport_standard,
+            "lodging_standard": trip.lodging_standard,
+            "allowed_transport": {},
+        }
+
     def check(self, facts):
         return {"status": "insufficient_information", "reason": "reviewed_database_rules_required"}
+
+    def estimate(self, facts):
+        return self.check(facts)
 
     def search(self, question: str) -> dict:
         if not self.documents_dir:

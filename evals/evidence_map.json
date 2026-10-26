@@ -28,16 +28,10 @@
   "tool-005": ["tests.test_query_contracts.QueryContractTests.test_transport_and_round_trip_required_fields"],
   "tool-006": ["tests.test_query_contracts.QueryGraphTests.test_empty_and_failure_have_different_answers_and_no_selection"],
   "tool-007": ["tests.test_task_results.ResultReferenceTests.test_rejects_stale_missing_unfinished_and_wrong_domain_results"],
-  "tool-008": ["tests.test_preferences.PreferenceGraphTests.test_temporary_hypothetical_other_person_and_quote_never_persist"],
+  "tool-008": ["tests.test_preference_autosave.PreferenceRemovalTests.test_preference_request_cannot_write_and_saved_trips_remain_readable"],
 
-  "memory-001": ["tests.test_preferences.PreferenceGraphTests.test_temporary_hypothetical_other_person_and_quote_never_persist"],
-  "memory-002": ["tests.test_preferences.PreferenceGraphTests.test_explicit_request_review_writes_without_second_confirmation"],
-  "memory-003": ["tests.test_preferences.PreferenceStoreTests.test_add_update_delete_preserve_unrelated_items_and_provenance"],
-  "memory-004": ["tests.test_preferences.PreferenceStoreTests.test_another_user_cannot_delete_by_known_id", "tests.test_memory_pg.ScopeTests.test_every_sync_checkpoint_access_rejects_other_user_before_sql"],
-  "memory-005": ["tests.test_preferences.PreferenceStoreTests.test_compatibility_merge_does_not_replace_other_preferences"],
-  "memory-006": ["tests.test_preferences.PreferenceGraphTests.test_temporary_hypothetical_other_person_and_quote_never_persist"],
   "memory-007": ["tests.test_task_lifecycle.TaskVersionTests.test_changes_invalidate_downstream_result_and_dispatch_rejects_old_version"],
-  "memory-008": ["tests.test_preferences.PreferenceStoreTests.test_stale_revision_and_delete_replay_cannot_overwrite_new_data"],
+  "memory-009": ["tests.test_preference_autosave.PreferenceRemovalTests.test_preference_request_cannot_write_and_saved_trips_remain_readable", "tests.test_preference_autosave.PreferenceRemovalTests.test_storage_contract_has_no_preference_api"],
 
   "recovery-001": ["tests.test_failed_turn_recovery.FailedTurnRecoveryTests.test_outage_then_authorized_retry_commits_original_correction_once"],
   "recovery-002": ["tests.test_failed_turn_recovery.FailedTurnRecoveryTests.test_outage_then_authorized_retry_commits_original_correction_once"],

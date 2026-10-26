@@ -54,7 +54,6 @@ def main():
     parser.add_argument("--node", required=True)
     parser.add_argument("--node-modules", required=True)
     parser.add_argument("--browser", required=True)
-    parser.add_argument("--preferences", action="store_true", help="验收偏好管理功能")
     parser.add_argument("--chat", action="store_true", help="验收真实模型聊天，仅写临时账号")
     parser.add_argument("--conversations", action="store_true", help="验收多会话，使用隔离测试图")
     parser.add_argument("--run-recovery", action="store_true", help="隔离图及数据库验收失败执行核实分叉")
@@ -68,7 +67,7 @@ def main():
                         help="仅故障恢复验收使用的模型故障位置")
     parser.add_argument("--langfuse", action="store_true", help="回读本批真实请求的匿名云端追踪")
     args = parser.parse_args()
-    if sum((args.preferences, args.chat, args.conversations, args.task_controls, args.policy_rag,
+    if sum((args.chat, args.conversations, args.task_controls, args.policy_rag,
             args.hotel_flow, args.failed_turn_flow, args.run_recovery, args.resources,
             args.university_policy)) > 1:
         parser.error("一次只能选择一种验收模式")
@@ -81,8 +80,8 @@ def main():
          "failed-turn-browser-" if args.failed_turn_flow else "hotel-flow-browser-" if args.hotel_flow else
          "policy-rag-browser-" if args.policy_rag else "task-controls-browser-" if args.task_controls else
          "conversations-browser-" if args.conversations else
-         "chat-browser-" if args.chat else "preferences-browser-") + uuid.uuid4().hex
-        if args.chat or args.preferences or args.conversations or args.task_controls or args.policy_rag
+         "chat-browser-" if args.chat else "auth-browser-") + uuid.uuid4().hex
+        if args.chat or args.conversations or args.task_controls or args.policy_rag
         or args.hotel_flow or args.failed_turn_flow or args.run_recovery or args.resources else "auth")
     output.mkdir(parents=True, exist_ok=True)
     schema = "travel_auth_browser_" + uuid.uuid4().hex
@@ -423,8 +422,7 @@ def main():
                  "verify_policy_rag_browser.cjs" if args.policy_rag else
                  "verify_task_controls_browser.cjs" if args.task_controls else
                  "verify_conversations_browser.cjs" if args.conversations else
-                 "verify_chat_browser.cjs" if args.chat else
-                 "verify_preferences_browser.cjs" if args.preferences else "verify_auth_browser.cjs")
+                 "verify_chat_browser.cjs" if args.chat else "verify_auth_browser.cjs")
         result = subprocess.run([str(Path(args.node).resolve()), str(root / "scripts" / suite)],
                                 env=env, cwd=root,
                                 timeout=960 if args.policy_rag or args.hotel_flow or args.failed_turn_flow else

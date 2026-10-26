@@ -31,7 +31,7 @@ TYPED_PROMPT = """
 Extract Chinese business-travel requests with TypedSubmission exactly once, without executing tools.
 This independent experimental schema uses intent and action=new/update, unlike production operations.
 Use policy_check for expense evaluation, policy_explain for explaining standards, plan_trip for
-travel arrangement searches, and other for conversation, preferences or unrelated requests.
+travel arrangement searches, and other for conversation, weather or unrelated requests.
 Preserve the user's goal, negation, attribution, conditions and all independent requests.
 Each task has a faithful standalone question; dependencies reference earlier tasks in this batch.
 Updates require the exact target_id/base_revision from current_slots; independent new tasks inherit nothing.

@@ -33,7 +33,7 @@ def main(argv=None):
             result = {"status": "initialized", "schema": settings.memory_schema}
         elif args.action == "check":
             with memory_connection(settings) as connection:
-                for table in ("user_preferences", "trips", "memory_imports", "checkpoints",
+                for table in ("trips", "memory_imports", "checkpoints",
                               "checkpoint_blobs", "checkpoint_writes", "checkpoint_migrations"):
                     if connection.execute("SELECT to_regclass(%s) AS name", (table,)).fetchone()["name"] is None:
                         raise ValueError("Memory schema is incomplete; run init")

@@ -20,11 +20,10 @@ _log = logging.getLogger(__name__)
 _NAMES = frozenset({
     "chat", "prepare", "dispatch", "assistant", "tools", "advance", "finish",
     "chat_model", "tool", "plan_trip", "consult_policy", "read_task_result",
-    "query_memory", "query_weather", "confirm_facts", "save_trip", "save_preferences",
-    "edit_preferences", "slot_extraction", "slot_attempt", "slot_validation",
+    "query_memory", "query_weather", "confirm_facts", "save_trip", "slot_extraction", "slot_attempt", "slot_validation",
     "slot_review", "slot_protocol", "slot_commit", "task_result", "planning", "policy_rag",
-    "policy_retrieve", "policy_result", "query_flight", "query_train", "query_hotel",
-    "candidate_policy", "commute", "context_budget", "read_conversation_history",
+    "policy_retrieve", "policy_rerank", "policy_result", "query_flight", "query_train", "query_hotel",
+    "candidate_policy", "commute", "context_budget", "read_conversation_history", "jev_decision",
 })
 _ENUMS = {
     "policy_stop_reason": frozenset({"retrieval_budget_exhausted", "repeated_query",
@@ -63,9 +62,16 @@ _ENUMS = {
 }
 _COUNTS = frozenset({"attempt", "count", "task_count", "revision", "retrievals",
                      "input_tokens", "output_tokens", "total_tokens", "http_status", "issue_count",
-                     "estimated_input_tokens", "context_input_limit"})
-_FLAGS = frozenset({"slots_committed", "checkpoint_committed", "inbound", "context_incomplete"})
+                     "blocking_issue_count", "warning_count", "staged_count", "failed_count",
+                     "task_index", "line_count",
+                     "estimated_input_tokens", "context_input_limit", "elapsed_ms"})
+_FLAGS = frozenset({"slots_committed", "checkpoint_committed", "inbound", "context_incomplete", "degraded"})
 _REFS = frozenset({"user_ref", "session_ref", "request_ref", "task_ref", "call_ref", "model_ref"})
+
+
+def _safe_ascii_identifier(value, *, max_length=128):
+    return (isinstance(value, str) and 0 < len(value) <= max_length
+            and all(33 <= ord(char) <= 126 for char in value))
 
 
 def safe_metadata(data):
@@ -85,6 +91,8 @@ def safe_metadata(data):
             safe[key] = value
         elif (key == "input_estimate_ratio" and type(value) in (int, float)
               and 0 <= value <= 10**12 and math.isfinite(value)):
+            safe[key] = value
+        elif key in {"error_code", "vector_error_code", "upstream_request_id"} and _safe_ascii_identifier(value):
             safe[key] = value
         elif (key in _REFS and isinstance(value, str) and len(value) == 64
               and all(c in "0123456789abcdef" for c in value)):
@@ -229,6 +237,11 @@ def observation(name, *, kind="span", **metadata):
         span.end()
 
 
+def current_observation():
+    """Return the active observation for bounded parent-level content updates."""
+    return _active.get()
+
+
 def observed(name):
     def decorate(function):
         @wraps(function)
@@ -271,8 +284,10 @@ class MetadataCallback(BaseCallbackHandler):
         if span:
             if output is not None:
                 span.content(output=output)
-            span.update(**(error_metadata(error) if error is not None else {"status": "ok"}),
-                        **safe_metadata(usage), usage_details=usage)
+            update = error_metadata(error) if error is not None else {"status": "ok"}
+            if usage is not None:
+                update.update(safe_metadata(usage), usage_details=usage)
+            span.update(**update)
             span.end()
 
     def on_chat_model_start(self, serialized, messages, *, run_id, parent_run_id=None, **kwargs):

@@ -4,10 +4,11 @@ import json
 import tempfile
 import unittest
 from dataclasses import replace
+from datetime import date
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
@@ -152,6 +153,35 @@ class GraphTests(unittest.TestCase):
         return build_assistant(factory, self.settings, self.memory, self.policy,
                                checkpointer=checkpointer or InMemorySaver(), provider=provider or FixtureProvider())
 
+    def test_supervisor_prompt_has_stable_prefix_and_current_date(self):
+        with patch("business_travel.graph.agent_graph") as assemble:
+            self.build([])
+        self.assertNotIn("Today is", assemble.call_args.args[2])
+        with patch("business_travel.graph.agent_graph") as assemble:
+            build_assistant(lambda role: ScriptedModel([]),
+                            replace(self.settings, prompt_date_mode="prefix"),
+                            self.memory, self.policy, provider=FixtureProvider())
+        self.assertIn(f"Today is {date.today().isoformat()}.", assemble.call_args.args[2])
+
+        model = ScriptedModel([AIMessage(content="First"), AIMessage(content="Second")])
+        graph = agent_graph(model, [], "Fixed rules")
+        with patch("business_travel.graph.date") as clock:
+            clock.today.side_effect = [date(2026, 10, 12), date(2026, 10, 13)]
+            graph.invoke({"messages": [HumanMessage(content="First request")]})
+            graph.invoke({"messages": [HumanMessage(content="Second request")]})
+
+        for messages, expected_date in zip(model.messages, ("2026-10-12", "2026-10-13")):
+            self.assertIsInstance(messages[0], SystemMessage)
+            self.assertEqual(messages[0].content, "Fixed rules")
+            self.assertEqual(messages[1].content, f"Today is {expected_date}.")
+            self.assertIsInstance(messages[-1], HumanMessage)
+
+        legacy = ScriptedModel([AIMessage(content="Legacy")])
+        agent_graph(legacy, [], "Legacy rules with date", settings=replace(
+            self.settings, prompt_date_mode="prefix")).invoke({"messages": [HumanMessage(content="Test")]})
+        self.assertEqual([message.content for message in legacy.messages[0]
+                          if isinstance(message, SystemMessage)], ["Legacy rules with date"])
+
     def test_planning_and_explicit_confirmation(self):
         graph = self.build([call("save_trip", {}, "save"), AIMessage(content="Saved, not booked.")],
                            slots=[slot_response(self.trip, "plan_trip"), slot_response()])
@@ -287,7 +317,7 @@ class GraphTests(unittest.TestCase):
         graph.invoke({"messages": [HumanMessage(content="2099-09-08上海")]})
         policy.check.assert_not_called()
 
-    def test_preferences_schema_and_automatic_save(self):
+    def test_long_term_preference_tools_are_not_exposed(self):
         schemas = {}
 
         class InspectModel(ScriptedModel):
@@ -296,32 +326,29 @@ class GraphTests(unittest.TestCase):
                                 for item in tools})
                 return self
 
-        preferences = [{"type": "transport", "value": ["train", "second_class"]}]
-        model = InspectModel([call("save_preferences", {"preferences": preferences, "context": {
-            "subject": "self", "scope": "long_term", "assertion": "actual", "quote": "Save preferences"}}, "save"),
-                              AIMessage(content="Saved")])
-        slots = ScriptedModel([slot_response()])
-        models = {"slots": slots, "supervisor": model, "reviewer": ScriptedModel([review_response(),
-            call("PreferenceReview", {"decision": "accept", "quote": "Save preferences"}, "review-pref")])}
-        graph = build_assistant(lambda role: models[role],
-                                self.settings, self.memory, self.policy,
+        model = InspectModel([AIMessage(content="不会保存长期偏好")])
+        models = {"slots": ScriptedModel([slot_response()]), "supervisor": model,
+                  "reviewer": ScriptedModel([review_response()])}
+        graph = build_assistant(lambda role: models[role], self.settings, self.memory, self.policy,
                                 checkpointer=InMemorySaver(), provider=FixtureProvider())
-        schema = schemas["save_preferences"]["function"]["parameters"]
-        self.assertIn("type", schema["properties"]["preferences"]["items"]["properties"])
-        self.assertNotIn("authorization", json.dumps(schema))
-        result = graph.invoke({"messages": [HumanMessage(content="Save preferences")]}, self.config)
+        self.assertNotIn("save_preferences", schemas)
+        self.assertNotIn("edit_preferences", schemas)
+        result = graph.invoke({"messages": [HumanMessage(content="记住我喜欢安静酒店")]}, self.config)
         self.assertNotIn("__interrupt__", result)
-        self.assertEqual(self.memory.read()["preferences"], preferences)
+        self.assertNotIn("preferences", self.memory.read())
 
     def test_policy_receives_original_user_context(self):
         policy = Mock()
         policy.search.return_value = {"status": "ok", "sources": []}
-        original = "上海出差两天，无专项审批，单人入住。"
+        policy.check.return_value = {"status": "within_checked_rules", "approved": False,
+                                     "sources": []}
+        original = "2099-09-08上海出差两天，无专项审批，单人入住。"
 
         def inspect_context(messages):
             data = json.loads(messages[-1].content)
             self.assertEqual(data["current_message"], original)
-            return slot_response({"kind": "hotel", "destination": "上海", "special_approval": False},
+            return slot_response({"kind": "hotel", "expense_date": "2099-09-08",
+                                  "destination": "上海", "special_approval": False},
                                  "policy_check", {"special_approval": "无专项审批"})(messages)
 
         models = {
@@ -347,24 +374,6 @@ class GraphTests(unittest.TestCase):
         response = next(m for m in result["messages"] if isinstance(m, ToolMessage))
         self.assertIn("TimeoutError", response.content)
         self.assertNotIn("secret-token", response.content)
-
-    def test_preference_rejection_and_invalid_fields_do_not_write(self):
-        preferences = [{"type": "hotel", "value": "non-smoking"}]
-        graph = self.build([
-            call("save_preferences", {"preferences": preferences}, "save"),
-            AIMessage(content="Cancelled"),
-            call("save_preferences", {"preferences": [{"hotel": "non-smoking"}]}, "invalid"),
-            AIMessage(content="Invalid input"),
-        ])
-        first = graph.invoke({"messages": [HumanMessage(content="Save")]}, self.config)
-        self.assertNotIn("__interrupt__", first)
-        status = json.loads(next(m.content for m in reversed(first["messages"]) if isinstance(m, ToolMessage)))
-        self.assertEqual(status["status"], "error")
-        self.assertIn({"field": "context", "type": "missing"}, status["issues"])
-        self.assertEqual(self.memory.read()["preferences"], [])
-        invalid = graph.invoke({"messages": [HumanMessage(content="Malformed preference")]}, self.config)
-        self.assertNotIn("__interrupt__", invalid)
-        self.assertEqual(self.memory.read()["preferences"], [])
 
 
 if __name__ == "__main__":

@@ -11,19 +11,6 @@ class Contract(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class TravelPreference(Contract):
-    type: str = Field(min_length=1, max_length=100, strict=True)
-    value: str | list[str]
-
-    @model_validator(mode="after")
-    def bounded_content(self):
-        values = [self.value] if isinstance(self.value, str) else self.value
-        if (not self.type.strip() or not 1 <= len(values) <= 20
-                or any(not value.strip() or len(value) > 1000 for value in values)):
-            raise ValueError("Preference content must be nonempty and bounded")
-        return self
-
-
 class QueryFields(Contract):
     query_scope: Literal["hotel", "transport", "combined"] = Field(
         description="Requested components: hotel only, transport only, or combined transport and hotel. "
@@ -50,8 +37,10 @@ class QueryFields(Contract):
     academic_title: str | None = Field(default=None, description="Explicit academic title, not a travel preference.")
     technical_grade: int | None = Field(default=None, ge=1, description="Explicit professional post grade.")
     management_grade: int | None = Field(default=None, ge=1)
-    transport_standard: str | None = Field(default=None, description="Explicitly stated applicable transport category; never infer from lodging rank.")
-    lodging_standard: str | None = Field(default=None, description="Explicit lodging table rank; never map a title or transport category to this rank.")
+    transport_standard: str | None = Field(default=None,
+        description="Applicable transport category; explicit user value takes precedence, otherwise the active policy may derive it from identity.")
+    lodging_standard: str | None = Field(default=None,
+        description="Separate lodging identity. Never derived from transport category, title, or post grade.")
     destination_province: str | None = Field(default=None, max_length=100)
     mainland_business_trip: bool | None = None
     long_assignment_days: int | None = Field(default=None, ge=1,
@@ -140,9 +129,17 @@ class CombinedRequest(TransportRequest):
 QueryRequest = HotelRequest | TransportRequest | CombinedRequest
 
 
-def parse_query_request(values: dict) -> QueryRequest:
+def parse_query_request(values: dict, *, default_mainland_business_trip: bool = True,
+                        default_single_guest: bool = True) -> QueryRequest:
     """Project reviewed facts into the requested components, preserving stored facts elsewhere."""
+    values = dict(values)
+    values.setdefault("mainland_business_trip", default_mainland_business_trip)
     scope = values.get("query_scope")
+    party_fields = ("hotel_rooms", "hotel_adults", "hotel_child_ages")
+    if (default_single_guest and isinstance(scope, str) and scope in {"hotel", "combined"}
+            and values.get("room_occupants") in (None, 1)
+            and all(values.get(name) is None for name in party_fields)):
+        values.update(hotel_rooms=1, hotel_adults=1, hotel_child_ages=[], room_occupants=1)
     contracts = {"hotel": HotelRequest, "transport": TransportRequest, "combined": CombinedRequest}
     if not isinstance(scope, str) or scope not in contracts:
         raise ValidationError.from_exception_data("QueryRequest", [

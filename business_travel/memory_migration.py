@@ -35,15 +35,20 @@ def legacy_thread(thread_id: str) -> tuple[str, str]:
     return validate_id(parts[0]), validate_id(parts[1])
 
 
+def _sqlite_tables(connection):
+    return {row[0] for row in connection.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+
+
 def inventory(directory: Path, legacy_directory: Path) -> dict:
     users = set()
-    counts = {"preferences": 0, "trips": 0, "checkpoints": 0, "legacy_files": 0}
+    counts = {"trips": 0, "checkpoints": 0, "legacy_files": 0}
     path = directory / "memory.sqlite"
     if path.exists():
         with readonly_sqlite(path) as connection:
-            for table, column, key in (("users", "id", "preferences"), ("trips", "user_id", "trips")):
-                rows = connection.execute(f"SELECT {column} FROM {table}").fetchall()
-                counts[key] = len(rows)
+            if "trips" in _sqlite_tables(connection):
+                rows = connection.execute("SELECT user_id FROM trips").fetchall()
+                counts["trips"] = len(rows)
                 users.update(validate_id(row[0]) for row in rows)
     path = directory / "checkpoints.sqlite"
     if path.exists():
@@ -60,20 +65,18 @@ def inventory(directory: Path, legacy_directory: Path) -> dict:
 @dataclass
 class ImportSnapshot:
     user_id: str
-    preferences: list | dict | None
     trips: list[dict]
     checkpoints: list = field(default_factory=list)
     writes: list = field(default_factory=list)
     digest: str = ""
 
     def summary(self):
-        return {"preferences": int(self.preferences is not None), "trips": len(self.trips),
-                "checkpoints": len(self.checkpoints), "pending_writes": len(self.writes)}
+        return {"trips": len(self.trips), "checkpoints": len(self.checkpoints),
+                "pending_writes": len(self.writes)}
 
 
 def read_snapshot(directory: Path, legacy_directory: Path, user_id: str) -> ImportSnapshot:
     validate_id(user_id)
-    preferences = None
     trips = {}
     evidence = []
     legacy_path = legacy_directory / f"{user_id}.json"
@@ -83,7 +86,6 @@ def read_snapshot(directory: Path, legacy_directory: Path, user_id: str) -> Impo
         legacy = json.loads(text)
         if not isinstance(legacy, dict):
             raise MigrationError("旧 JSON 记忆必须为对象，请先修复源文件副本")
-        preferences = legacy.get("preferences")
         for trip in legacy.get("trip_history", []):
             if not isinstance(trip, dict) or not isinstance(trip.get("id"), str) or not trip["id"]:
                 raise MigrationError("旧行程缺少 ID，需要人工映射；没有丢弃记录")
@@ -93,11 +95,17 @@ def read_snapshot(directory: Path, legacy_directory: Path, user_id: str) -> Impo
     path = directory / "memory.sqlite"
     if path.exists():
         with readonly_sqlite(path) as connection:
-            row = connection.execute("SELECT data FROM users WHERE id=?", (user_id,)).fetchone()
-            if row:
-                evidence.append(row)
-                preferences = json.loads(row[0])
-            rows = connection.execute(
+            tables = _sqlite_tables(connection)
+            if "users" in tables:
+                row = connection.execute("SELECT data FROM users WHERE id=?", (user_id,)).fetchone()
+                if row:
+                    evidence.append(row)
+                    # Parse retired preference payloads and discard them. A bad blob must not block trips.
+                    try:
+                        json.loads(row[0])
+                    except (json.JSONDecodeError, TypeError, ValueError):
+                        pass
+            rows = [] if "trips" not in tables else connection.execute(
                 "SELECT draft_id,data FROM trips WHERE user_id=? ORDER BY rowid", (user_id,),
             ).fetchall()
             evidence.extend(rows)
@@ -109,9 +117,7 @@ def read_snapshot(directory: Path, legacy_directory: Path, user_id: str) -> Impo
                     raise MigrationError("SQLite 与旧 JSON 的同 ID 行程内容冲突，请人工核对")
                 trips.pop(draft_id, None)
                 trips[draft_id] = trip
-    if preferences is not None and not isinstance(preferences, (list, dict)):
-        raise MigrationError("旧偏好必须是数组或对象，请检查源数据格式")
-    snapshot = ImportSnapshot(user_id, preferences, list(trips.values()))
+    snapshot = ImportSnapshot(user_id, list(trips.values()))
     path = directory / "checkpoints.sqlite"
     if path.exists():
         with readonly_sqlite(path) as connection:
@@ -166,7 +172,7 @@ def import_snapshot(settings, snapshot: ImportSnapshot) -> dict:
 
     with memory_connection(settings) as connection, connection.transaction():
         # Migration is an offline maintenance operation. Also block concurrent SQL writers.
-        connection.execute("LOCK TABLE user_preferences,trips,memory_imports,checkpoints,"
+        connection.execute("LOCK TABLE trips,memory_imports,checkpoints,"
                            "checkpoint_blobs,checkpoint_writes IN SHARE ROW EXCLUSIVE MODE")
         done = connection.execute(
             "SELECT summary FROM memory_imports WHERE company_id=%s AND user_id=%s AND source_digest=%s",
@@ -174,16 +180,6 @@ def import_snapshot(settings, snapshot: ImportSnapshot) -> dict:
         ).fetchone()
         if done:
             return {"status": "already_imported", **done["summary"]}
-        if snapshot.preferences is not None:
-            row = connection.execute(
-                "SELECT data FROM user_preferences WHERE company_id=%s AND user_id=%s", scope,
-            ).fetchone()
-            if row and row["data"] != snapshot.preferences:
-                raise MigrationError("目标已有不同偏好，已回滚本用户导入；请人工选择保留版本")
-            connection.execute(
-                "INSERT INTO user_preferences(company_id,user_id,data) VALUES(%s,%s,%s) "
-                "ON CONFLICT DO NOTHING", (*scope, Jsonb(snapshot.preferences)),
-            )
         for trip in snapshot.trips:
             row = connection.execute(
                 "SELECT data FROM trips WHERE company_id=%s AND user_id=%s AND draft_id=%s",
@@ -229,12 +225,6 @@ def import_snapshot(settings, snapshot: ImportSnapshot) -> dict:
                     or actual.parent_config != expected_parent or actual.metadata != item.metadata
                     or actual.pending_writes != item.pending_writes):
                 raise MigrationError("检查点、父关系或中间写入核验不一致，已回滚本用户全部导入")
-        if snapshot.preferences is not None:
-            saved = connection.execute(
-                "SELECT data FROM user_preferences WHERE company_id=%s AND user_id=%s", scope,
-            ).fetchone()
-            if not saved or saved["data"] != snapshot.preferences:
-                raise MigrationError("偏好回读核验失败，已回滚本用户全部导入")
         for trip in snapshot.trips:
             saved = connection.execute(
                 "SELECT data FROM trips WHERE company_id=%s AND user_id=%s AND draft_id=%s",

@@ -64,7 +64,7 @@ current message. Do not reuse an old model proposal. Reconcile corrections chron
 current statements override older statements, including retractions and negation.
 Field evidence may cite exact text from selected retryable pending turns, or current text.
 No other historical evidence is allowed. Intent changes and task_controls still require CURRENT
-evidence. Never replay a pending preference write, save, booking, confirmation or other delegated
+evidence. Never replay a pending save, booking, confirmation or other delegated
 action: ask for a fresh explicit request via the ordinary workflow.
 If selected pending turns have retryable=false, clarify the desired current facts; do not apply
 old changes after business state has changed. The user can restate facts in the current message.

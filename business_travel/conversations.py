@@ -7,7 +7,7 @@ from .memory_pg import memory_connection
 
 
 def setup_conversations(settings):
-    """Explicit, additive deployment step; no checkpoint or preference changes."""
+    """Explicit, additive deployment step; no checkpoint changes."""
     with memory_connection(settings) as connection, connection.transaction():
         connection.execute("""
             CREATE TABLE IF NOT EXISTS conversations (

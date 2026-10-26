@@ -209,6 +209,46 @@ class PolicyRequirementTests(unittest.TestCase):
         self.assertFalse(self.writer.messages)
         self.assertFalse(self.reviewer.messages)
 
+    def test_all_region_lodging_table_preserves_facts_and_bypasses_model_fabrication(self):
+        rows = [
+            {"row_id": "lodging-r1", "region": "北京", "localities": ["全市"],
+             "caps": {"部级": "1100"}, "ordinary_cap": "1100", "seasonal_cap": None,
+             "season_text": "", "source_ref": None},
+            {"row_id": "lodging-r2", "region": "上海", "localities": ["全市"],
+             "caps": {"部级": "1100"}, "ordinary_cap": "1100", "seasonal_cap": None,
+             "season_text": "", "source_ref": None},
+        ]
+
+        class Store:
+            def search_for_facts(self, question, facts, *, policy_query=None):
+                self.policy_query = policy_query
+                return result(
+                    policy_profile="university",
+                    sources=[source(chunk="lodging-r1", text="北京；部级：1100元/人·天"),
+                             source(chunk="lodging-r2", text="上海；部级：1100元/人·天")],
+                    lodging_table={"status": "ok", "standard": "部级", "grades": ["部级"],
+                                   "unit": "person_day", "currency": "CNY", "rows": rows,
+                                   "source_chunks": ["lodging-r1", "lodging-r2"]},
+                )
+
+        store = Store()
+        writer = FakeModel([])
+        reviewer = FakeModel([])
+        data = explain_policy(
+            store, lambda role: {"policy": writer, "policy_reviewer": reviewer}[role], settings(),
+            "所有地区的住宿标准都列举一下",
+            facts={"kind": "hotel", "destination": "北京", "lodging_standard": "部级"},
+            user_request="所有地区的住宿标准都列举一下",
+            policy_query={"category": "hotel", "mode": "personal_limit", "coverage": "all_regions"},
+        )
+        self.assertEqual(data["rag"]["status"], "answered")
+        self.assertEqual(store.policy_query["coverage"], "all_regions")
+        self.assertFalse(writer.messages)
+        rendered = render_policy(data)
+        self.assertIn("北京", rendered)
+        self.assertIn("上海", rendered)
+        self.assertIn("[来源1]", rendered)
+
     def test_model_draft_cannot_add_unrelated_conditions(self):
         data = self.run_policy([answer(decision="clarify", claims=[], question="哪天入住？",
                                       requested_fields=["expense_date"])] * 2)
@@ -236,7 +276,7 @@ class PolicyRequirementTests(unittest.TestCase):
                        requested_fields=["lodging_standard"])
         data = self.run_policy([draft], exact={"status": "insufficient_information",
             "reason": "lodging_inputs_required", "missing_fields": ["lodging_standard"]})
-        expected = "请补充或核实：住宿附表人员档次。"
+        expected = "请补充或核实：住宿人员档次。"
         self.assertEqual(data["rag"]["proposal"]["question"], expected)
         self.assertEqual(data["rag"]["proposal"]["requested_fields"], ["lodging_standard"])
         self.assertFalse(self.writer.messages)

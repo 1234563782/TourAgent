@@ -57,7 +57,7 @@ def _execution_order(tasks, queue):
 
 
 def task_snapshot(tasks, *, pending_only=False):
-    fields = ("id", "intent", "question", "subject_id", "revision", "status",
+    fields = ("id", "intent", "question", "canonical_question", "subject_id", "revision", "status",
               "missing_fields", "dependencies", "result_ref", "attempt", "reason", "operation")
     return [{key: task[key] for key in fields if key in task}
             for task in tasks.values()
@@ -102,8 +102,13 @@ def reconcile_tasks(existing, proposals, slots, controls=()):
         ident = prior["id"] if prior else str(uuid.uuid4())
         ids.append(ident)
         latest[ident] = index
+        question = proposal["question"]
+        canonical_question = proposal.get("canonical_question") or question
+        if prior and proposal.get("operation") == "update_facts" and not proposal.get("canonical_question"):
+            canonical_question = prior.get("canonical_question") or prior.get("question") or question
         tasks[ident] = {
-            "id": ident, "intent": proposal["intent"], "question": proposal["question"],
+            "id": ident, "intent": proposal["intent"], "question": question,
+            "canonical_question": canonical_question,
             "subject_id": subject_id, "revision": subject["revision"] if subject else None,
             "status": "ready", "missing_fields": [],
             "dependencies": list(prior.get("dependencies", [])) if prior else [], "result_ref": None,

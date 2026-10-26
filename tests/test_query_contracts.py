@@ -14,13 +14,33 @@ from business_travel.planning import run_planner
 from business_travel.plan_checks import render_draft
 from business_travel.policy_pg import PostgresPolicyStore
 from business_travel.providers import FlyAIProvider, normalize_flyai
-from business_travel.slots import SlotError, SlotTask, stage_submission
+from business_travel.slots import SlotError, SlotTask, TaskClarification, stage_submission
 from business_travel.tuniu import ProviderFailure, normalize_tuniu, search_arguments
 from tests import test_travel_graph as fixtures
 from tests.test_travel_graph import ScriptedModel, select_result, slot_response
 
 
 class QueryContractTests(unittest.TestCase):
+    def test_planning_defaults_to_mainland_business_trip_when_unspecified(self):
+        request = parse_query_request({
+            "query_scope": "hotel", "destination": "Synthetic City",
+            "check_in": "2099-10-03", "check_out": "2099-10-05",
+        })
+        self.assertTrue(request.mainland_business_trip)
+        self.assertEqual(parse_query_request(
+            {"query_scope": "hotel", "destination": "Synthetic City",
+             "check_in": "2099-10-03", "check_out": "2099-10-05"},
+            default_mainland_business_trip=False,
+        ).mainland_business_trip, False)
+
+    def test_explicit_mainland_business_trip_value_overrides_default(self):
+        request = parse_query_request({
+            "query_scope": "hotel", "destination": "Synthetic City",
+            "check_in": "2099-10-03", "check_out": "2099-10-05",
+            "mainland_business_trip": False,
+        })
+        self.assertFalse(request.mainland_business_trip)
+
     def test_hotel_needs_no_transport_facts(self):
         request = parse_query_request({
             "query_scope": "hotel", "destination": "Synthetic City",
@@ -31,6 +51,7 @@ class QueryContractTests(unittest.TestCase):
         self.assertIsNone(request.departure_date)
         self.assertEqual(search_arguments("hotel", request, False), {
             "cityName": "Synthetic City", "checkIn": "2099-10-03", "checkOut": "2099-10-05",
+            "adultNum": 1, "childNum": 0, "childAges": [],
         })
         with self.assertRaises(ProviderFailure):
             search_arguments("flight", request, False)
@@ -104,15 +125,40 @@ class QueryContractTests(unittest.TestCase):
                             expected += [("hotel", False)]
                         self.assertEqual(request.search_stages(), expected)
 
-    def test_scope_requires_current_user_evidence(self):
-        for evidence in ({}, {"query_scope": {"user_message": 0, "quote": "酒店"}}):
-            with self.subTest(evidence=evidence), self.assertRaises(SlotError):
-                stage_submission(SlotTask(intent="plan_trip", trip={"query_scope": "hotel"},
-                                          evidence=evidence), {}, ["查酒店", "继续"])
+    def test_query_scope_is_classification_and_facts_still_require_quotes(self):
+        staged = stage_submission(
+            SlotTask(intent="plan_trip", trip={"query_scope": "hotel"}, evidence={}),
+            {}, ["查南京的酒店。"])
+        self.assertEqual(staged["trip"]["values"]["query_scope"], "hotel")
+        self.assertNotIn("query_scope", staged["trip"]["evidence"])
+        self.assertEqual(staged["trip"]["provenance"]["query_scope"]["source"], "model_inference")
+        with self.assertRaisesRegex(SlotError, "destination:cite_exact_current_message"):
+            stage_submission(SlotTask(
+                intent="plan_trip",
+                trip={"query_scope": "hotel", "destination": "南京"},
+                evidence={"destination": {"user_message": 0, "quote": "北京"}},
+            ), {}, ["查南京的酒店。"])
 
-    def test_new_task_cannot_fall_back_to_legacy_scope(self):
+    def test_unstated_journey_is_not_stored(self):
+        staged = stage_submission(SlotTask(
+            intent="plan_trip",
+            trip={"query_scope": "transport", "journey": "one_way", "destination": "北京"},
+            evidence={"destination": {"user_message": 0, "quote": "北京"}},
+        ), {}, ["来一张去北京的票"])
+        self.assertNotIn("journey", staged["trip"]["values"])
+        self.assertEqual(staged["trip"]["values"]["destination"], "北京")
+        stated = stage_submission(SlotTask(
+            intent="plan_trip",
+            trip={"query_scope": "transport", "journey": "one_way", "destination": "北京"},
+            evidence={"destination": {"user_message": 0, "quote": "北京"},
+                      "journey": {"user_message": 0, "quote": "单程"}},
+        ), {}, ["单程去北京"])
+        self.assertEqual(stated["trip"]["values"]["journey"], "one_way")
+
+    def test_new_task_without_scope_asks_instead_of_retrying(self):
         for value in ({}, {"query_scope": None}):
-            with self.subTest(value=value), self.assertRaisesRegex(SlotError, "query_scope_required"):
+            with self.subTest(value=value), self.assertRaisesRegex(
+                    TaskClarification, "请说明要查酒店、交通，还是两者都查"):
                 stage_submission(SlotTask(intent="plan_trip", trip=value), {}, ["查酒店"])
 
     def test_explicit_scope_cannot_be_retracted_to_legacy_default(self):

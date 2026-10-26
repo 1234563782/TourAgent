@@ -119,16 +119,19 @@ class AuthLiveTests(unittest.TestCase):
     def test_http_two_users_cannot_read_each_others_memory(self):
         name2 = "user_" + uuid.uuid4().hex
         identity2 = self.store.create_user(name2, self.password)
-        PostgresTravelMemory(self.settings, self.identity).save_preferences([{"seat": "aisle"}])
-        PostgresTravelMemory(self.settings, identity2).save_preferences([{"seat": "window"}])
+        PostgresTravelMemory(self.settings, self.identity).save_trip({"id": "trip-a", "note": "aisle"})
+        PostgresTravelMemory(self.settings, identity2).save_trip({"id": "trip-b", "note": "window"})
         app = create_app(self.settings, self.config)
         headers = {"Origin": self.config.origin}
         with TestClient(app, base_url=self.config.origin) as first, TestClient(app, base_url=self.config.origin) as second:
             for client, name in [(first, self.name), (second, name2)]:
                 self.assertEqual(client.post("/api/auth/login", headers=headers,
                                             json={"username": name, "password": self.password}).status_code, 200)
-            self.assertEqual(first.get("/api/memory").json()["preferences"], [{"seat": "aisle"}])
-            self.assertEqual(second.get("/api/memory").json()["preferences"], [{"seat": "window"}])
+            first_memory = first.get("/api/memory").json()
+            second_memory = second.get("/api/memory").json()
+            self.assertNotIn("preferences", first_memory)
+            self.assertEqual(first_memory["trip_history"][0]["id"], "trip-a")
+            self.assertEqual(second_memory["trip_history"][0]["id"], "trip-b")
             self.assertEqual(first.get("/api/memory?user_id=" + identity2.user_id).status_code, 400)
             old_cookie = first.cookies.get(COOKIE_NAME)
             self.assertEqual(first.post("/api/auth/logout", headers=headers).status_code, 204)

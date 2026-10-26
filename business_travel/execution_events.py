@@ -20,7 +20,6 @@ STAGE_LABELS = {
     "memory": "正在读取个人记录",
     "weather": "正在查询天气",
     "confirmation": "正在核对确认事项",
-    "preferences": "正在处理偏好变更",
     "save": "正在处理行程保存",
 }
 

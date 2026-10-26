@@ -58,12 +58,50 @@ function renderChatText(container, text, { streaming = false } = {}) {
     document.activeElement?.parentElement?.dataset.detailKey;
   const fragment = document.createDocumentFragment();
   let detailIndex = 0;
+  const blocks = parseChatText(text, streaming);
+  const evidencePositions = new Map();
+  blocks.forEach((block, index) => {
+    if (block.type === "details" && /^政策依据 · 来源[1-9]\d*$/.test(block.title)) {
+      if (!evidencePositions.has(block.title)) evidencePositions.set(block.title, []);
+      evidencePositions.get(block.title).push(index);
+    }
+  });
+  const evidenceDetails = new Map();
   function element(tag, content) {
     const node = document.createElement(tag);
     if (content !== undefined) node.textContent = content;
     return node;
   }
-  for (const block of parseChatText(text, streaming)) {
+  function citedParagraph(text, blockIndex) {
+    const paragraph = element("p");
+    let offset = 0;
+    for (const match of text.matchAll(/\[来源([1-9]\d*)\]/g)) {
+      const title = `政策依据 · 来源${match[1]}`;
+      const targetIndex = evidencePositions.get(title)?.find((index) => index > blockIndex);
+      if (targetIndex === undefined) continue;
+      const projectRule = blocks[targetIndex].text.startsWith("项目推荐口径 / ");
+      paragraph.append(document.createTextNode(text.slice(offset, match.index)));
+      const reference = element("button", projectRule ? "[项目口径]" : match[0]);
+      reference.type = "button";
+      reference.className = "citation-reference";
+      reference.title = `查看来源${match[1]}的依据摘录`;
+      if (projectRule) reference.title += "（项目口径，非制度原文）";
+      reference.setAttribute("aria-label", reference.title);
+      reference.addEventListener("click", () => {
+        // Several tool results can share one message and restart source numbering.
+        const detail = evidenceDetails.get(title)?.find((entry) => entry.index > blockIndex)?.node;
+        if (!detail) return;
+        detail.open = true;
+        detail.querySelector("summary").focus({ preventScroll: true });
+        detail.scrollIntoView({ block: "nearest" });
+      });
+      paragraph.append(reference);
+      offset = match.index + match[0].length;
+    }
+    paragraph.append(document.createTextNode(text.slice(offset)));
+    return paragraph;
+  }
+  for (const [blockIndex, block] of blocks.entries()) {
     if (block.type === "heading") {
       fragment.append(element("h3", block.text));
     } else if (block.type === "details") {
@@ -71,6 +109,10 @@ function renderChatText(container, text, { streaming = false } = {}) {
       detail.dataset.detailKey = `${detailIndex++}:${block.title}`;
       detail.open = opened.get(detail.dataset.detailKey) || false;
       detail.append(element("summary", block.title), element("p", block.text));
+      if (evidencePositions.has(block.title)) {
+        if (!evidenceDetails.has(block.title)) evidenceDetails.set(block.title, []);
+        evidenceDetails.get(block.title).push({ index: blockIndex, node: detail });
+      }
       fragment.append(detail);
     } else if (block.type === "table") {
       const wrapper = element("div");
@@ -91,14 +133,18 @@ function renderChatText(container, text, { streaming = false } = {}) {
       const body = element("tbody");
       block.rows.forEach((cells) => {
         const row = element("tr");
-        cells.forEach((cell) => row.append(element("td", cell)));
+        cells.forEach((cell) => {
+          const td = element("td");
+          td.append(...citedParagraph(cell, blockIndex).childNodes);
+          row.append(td);
+        });
         body.append(row);
       });
       table.append(body);
       wrapper.append(table);
       fragment.append(wrapper);
     } else {
-      fragment.append(element("p", block.text));
+      fragment.append(citedParagraph(block.text, blockIndex));
     }
   }
   container.classList.add("chat-formatted");

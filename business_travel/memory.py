@@ -6,15 +6,11 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Protocol
-from .preferences import PreferenceMutation, mutate, preference_values, snapshot
 
 
 class MemoryStore(Protocol):
     def read(self) -> dict: ...
     def save_trip(self, draft: dict): ...
-    def save_preferences(self, preferences: list[dict]): ...
-    def preference_snapshot(self) -> dict: ...
-    def mutate_preferences(self, mutation: PreferenceMutation, source: dict) -> dict: ...
 
 
 def validate_id(value: str) -> str:
@@ -30,7 +26,6 @@ class TravelMemory:
         self.path = directory / "memory.sqlite"
         self.legacy_path = legacy_directory / f"{self.user_id}.json"
         with self._connect() as connection:
-            connection.execute("CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, data TEXT NOT NULL)")
             connection.execute("CREATE TABLE IF NOT EXISTS trips (user_id TEXT, draft_id TEXT, data TEXT NOT NULL,"
                                " PRIMARY KEY(user_id, draft_id))")
 
@@ -55,32 +50,11 @@ class TravelMemory:
     def read(self) -> dict:
         legacy = self._legacy()
         with self._connect() as connection:
-            row = connection.execute("SELECT data FROM users WHERE id=?", (self.user_id,)).fetchone()
             trips = connection.execute("SELECT data FROM trips WHERE user_id=? ORDER BY rowid DESC LIMIT 10",
                                        (self.user_id,)).fetchall()
-        return {"preferences": preference_values(json.loads(row[0])) if row else legacy.get("preferences", []),
-                "trip_history": [json.loads(row[0]) for row in trips] + legacy.get("trip_history", [])[-10:]}
-
-    def preference_snapshot(self):
-        with self._connect() as connection:
-            row = connection.execute("SELECT data FROM users WHERE id=?", (self.user_id,)).fetchone()
-        return snapshot(json.loads(row[0]) if row else self._legacy().get("preferences", []))
-
-    def mutate_preferences(self, mutation: PreferenceMutation, source: dict):
-        with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            row = connection.execute("SELECT data FROM users WHERE id=?", (self.user_id,)).fetchone()
-            updated = mutate(json.loads(row[0]) if row else self._legacy().get("preferences", []), mutation, source)
-            connection.execute("INSERT INTO users(id,data) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data",
-                               (self.user_id, json.dumps(updated, ensure_ascii=False)))
-        return snapshot(updated)
+        return {"trip_history": [json.loads(row[0]) for row in trips] + legacy.get("trip_history", [])[-10:]}
 
     def save_trip(self, draft: dict):
         with self._connect() as connection:
             connection.execute("INSERT OR IGNORE INTO trips(user_id, draft_id, data) VALUES(?,?,?)",
                                (self.user_id, draft["id"], json.dumps(draft, ensure_ascii=False)))
-
-    def save_preferences(self, preferences: list[dict]):
-        with self._connect() as connection:
-            connection.execute("INSERT INTO users(id,data) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data",
-                               (self.user_id, json.dumps(preferences, ensure_ascii=False)))

@@ -71,7 +71,7 @@ def direct_extract(model, messages, current, settings):
         "task_context": [], "pending_tasks": [], "pending_turns": [],
     }
     try:
-        submission, _, _ = propose_slots(model, messages, current, payload,
+        submission, _, _, _ = propose_slots(model, messages, current, payload,
                                         context_limit=settings.slot_context_limit)
     except Exception as error:
         return {"status": "error", "reason": "slot_model_unavailable",
