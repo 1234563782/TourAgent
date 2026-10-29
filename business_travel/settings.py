@@ -92,8 +92,8 @@ class Settings:
     policy_hnsw_m: int = 16
     policy_hnsw_ef_construction: int = 128
     policy_hnsw_ef_search: int = 80
-    policy_top_k: int = 5
-    policy_recall_k: int = 20
+    policy_top_k: int = 10
+    policy_recall_k: int = 40
     policy_rrf_k: int = 60
     policy_rerank_mode: str = "qwen"
     rerank_base_url: str = "https://maas.qianwenaiapi.com/api/v1"
@@ -248,8 +248,8 @@ class Settings:
             policy_hnsw_m=int(getenv("TRAVEL_POLICY_HNSW_M") or "16"),
             policy_hnsw_ef_construction=int(getenv("TRAVEL_POLICY_HNSW_EF_CONSTRUCTION") or "128"),
             policy_hnsw_ef_search=int(getenv("TRAVEL_POLICY_HNSW_EF_SEARCH") or "80"),
-            policy_top_k=int(getenv("TRAVEL_POLICY_TOP_K") or "5"),
-            policy_recall_k=int(getenv("TRAVEL_POLICY_RECALL_K") or "20"),
+            policy_top_k=int(getenv("TRAVEL_POLICY_TOP_K") or "10"),
+            policy_recall_k=int(getenv("TRAVEL_POLICY_RECALL_K") or "40"),
             policy_rrf_k=int(getenv("TRAVEL_POLICY_RRF_K") or "60"),
             policy_rerank_mode=(getenv("TRAVEL_POLICY_RERANK_MODE") or "qwen").strip(),
             rerank_base_url=(getenv("TRAVEL_RERANK_BASE_URL")

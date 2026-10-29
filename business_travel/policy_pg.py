@@ -605,12 +605,10 @@ class PostgresPolicyStore:
                         "ORDER BY ts_rank_cd(keywords,to_tsquery('simple',%s)) DESC,chunk_id LIMIT %s",
                         (doc["id"], " | ".join(terms), " | ".join(terms), self.settings.policy_recall_k)).fetchall()
                 keyword_ids = [r["chunk_id"] for r in keyword_rows]
-                ids = reciprocal_rank_fusion(vector_ids, keyword_ids,
-                                             k=self.settings.policy_rrf_k, limit=self.settings.policy_top_k)
-                rrf_ids = list(ids)
                 candidate_ids = reciprocal_rank_fusion(
                     vector_ids, keyword_ids, k=self.settings.policy_rrf_k,
                     limit=max(self.settings.policy_top_k, self.settings.rerank_candidates))
+                rrf_ids = candidate_ids[:self.settings.policy_top_k]
                 ids, rerank_info = self._rerank(conn, doc, question, candidate_ids, rrf_ids)
                 facts = _facts or {}
                 coverage = (_policy_query or {}).get("coverage", "target")
