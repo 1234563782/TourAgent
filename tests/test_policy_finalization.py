@@ -253,6 +253,64 @@ class FinalizationTests(unittest.TestCase):
         self.assertIn("超时", render_policy(data))
         self.assertEqual(len(self.writer.messages), 2)
 
+    def test_final_pruning_recovers_supported_claims_to_partial(self):
+        two_claims_partial = answer(decision="partial", claims=[
+            {"text": "合规结论1", "citations": [{"source_id": "S1"}]},
+            {"text": "未支持结论2", "citations": [{"source_id": "S1"}]},
+        ], limitations=partial()["limitations"])
+        # Review 1: claim 0 supported, claim 1 unsupported -> triggers pruning
+        review1 = tool_response("PolicyEvidenceReview", {
+            "claim_checks": [
+                {"claim_index": 0, "supported": True},
+                {"claim_index": 1, "supported": False},
+            ],
+            "limitations_valid": True, "scope_preserved": True,
+            "coverage_complete": False, "conflict": False,
+        })
+        # Review 2 on pruned proposal: single claim supported -> accepts
+        review2 = tool_response("PolicyEvidenceReview", {
+            "claim_checks": [{"claim_index": 0, "supported": True}],
+            "limitations_valid": True, "scope_preserved": True,
+            "coverage_complete": False, "conflict": False,
+        })
+        data = self.run_policy([
+            retrieve("补找映射"),
+            tool_response("PolicyFinalAnswer", two_claims_partial),
+        ], reviews=[
+            tool_response("PolicyAnswerReview", {"verdict": "accept"}),
+            review1,
+            review2,
+        ], config=replace(settings(), policy_rag_max_retrievals=1, policy_rag_max_answer_attempts=1))
+        self.assertEqual(data["rag"]["status"], "partial")
+        published_claims = data["rag"]["proposal"]["claims"]
+        self.assertEqual(len(published_claims), 1)
+        self.assertEqual(published_claims[0]["text"], "合规结论1")
+        self.assertTrue(any(lim["topic"] == "部分结论未发布" for lim in data["rag"]["proposal"]["limitations"]))
+
+    def test_final_pruning_aborts_when_all_claims_unsupported_or_re_review_fails(self):
+        two_claims_partial = answer(decision="partial", claims=[
+            {"text": "未支持结论1", "citations": [{"source_id": "S1"}]},
+            {"text": "未支持结论2", "citations": [{"source_id": "S1"}]},
+        ], limitations=partial()["limitations"])
+        # All claims unsupported -> cannot prune to empty claims
+        all_unsupported = tool_response("PolicyEvidenceReview", {
+            "claim_checks": [
+                {"claim_index": 0, "supported": False},
+                {"claim_index": 1, "supported": False},
+            ],
+            "limitations_valid": True, "scope_preserved": True,
+            "coverage_complete": False, "conflict": False,
+        })
+        data = self.run_policy([
+            retrieve("补找映射"),
+            tool_response("PolicyFinalAnswer", two_claims_partial),
+        ], reviews=[
+            tool_response("PolicyAnswerReview", {"verdict": "accept"}),
+            all_unsupported,
+        ], config=replace(settings(), policy_rag_max_retrievals=1, policy_rag_max_answer_attempts=1))
+        self.assertEqual(data["rag"]["status"], "insufficient")
+        self.assertNotIn("proposal", data["rag"])
+
     def test_merged_evidence_stays_bounded_and_never_crosses_versions(self):
         for second, config, expected in (
             (result(sources=[source(chunk="new")]),

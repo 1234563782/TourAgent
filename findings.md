@@ -50,3 +50,45 @@
 - 已删除 `tests/test_plan_policy_citations.py` 中 `legacy_rules` 参数及两处调用，删除 `tests/test_rag_corrections.py` 对该字段存在性的测试。
 - 代码和配置目录中不再引用 `lodging_categories` 或 `legacy_rules`；Prompt、manifest 和身份字段仍保持交通/住宿分离语义。
 - 验证：`compileall -q business_travel tests` 通过；`tests.test_university_policy` 39 项通过。`tests.test_plan_policy_citations` 因当前运行时 `_ctypes` DLL 导入错误无法执行；此前也遇到缺少测试目录导入路径的问题，已用 `PYTHONPATH` 修正后仍被 `_ctypes` 阻断。
+
+## 2026-10-29 方案 A-D 只读评审
+
+### A：PolicyAnswer 前置清洗
+
+- 当前 `PolicyAnswer` 的字段都有默认空值：claims/limitations/requested_fields 默认空列表，question/search_query 默认空字符串；`consistent_action` 主要拒绝非空的跨动作字段，以及 answer/partial/clarify/retrieve 的真正语义不一致。模型补齐 `question=""`、`search_query=""`、`claims=[]` 等默认空值本身不会触发对应的冲突校验。
+- 当前示例中对 answer 删除空 `limitations`/`requested_fields` 没有实际收益，因为默认值已经是空列表；但对 `partial` 删除 limitations 会把本来需要拒绝的非法 partial 伪装成 answer-like payload，随后仍会因 `partial_requires_limitations_only` 失败。
+- before validator 若原地修改 data 会污染调用方对象；应复制 dict。不能把非空跨动作值清空，也不应把非法类型通过 `str()` 转成合法值。建议仅丢弃空白字符串和空列表，然后继续让 after validator 拒绝真正混合动作；同时为默认空字段补充回归测试和工具 schema 说明。
+
+### B：Reviewer Claim-level Pruning
+
+- 当前只有终止阶段 `PolicyEvidenceReview` 返回逐条 `claim_checks`；普通 `PolicyAnswerReview` 只有 verdict/issues，没有 claim 索引。因此示例不能直接用于普通审核拒绝。
+- `_review_evidence()` 会把 unsupported 索引放在 `review_feedback["unsupported_claim_indices"]`，但这只发生在 finalization 路径；普通审核拒绝的 `review_feedback` 为空。
+- 直接将未支持 claim 改成 `missing_evidence` limitation 可能违反 limitation 规则：detail/next_step 不能夹带未经引用的政策结论；“部分限制条款”也可能不是用户实际缺口。还需重新做 citations/limitations 校验并保证 partial 的 reviewer 重新审核。
+- 若只有 unsupported claim 且存在至少一个有证据 claim，安全实现应是终止阶段专用、保留 supported claim、生成基于实际 claim 的结构化 limitation，并再次跑 `_review_evidence()`；不能在普通拒绝或任意 `unsupported_claim` 上直接发布。
+
+### C：超限平滑截断
+
+- 当前 `policy_pg.py` 已在数据库检索阶段按 `policy_context_limit` 截断，并通过 `context_incomplete` 标记缺少链接闭包；`policy_rag.py` 发现 `context_incomplete` 或字符超限后直接返回 `incomplete`，现有测试明确锁定该安全行为。
+- 直接 `evidence[:settings.policy_top_k]` 有三个问题：`policy_top_k` 是检索候选规模，不是已验证证据排序；可能丢掉住宿表行、scope 条款或 related_ids 闭包；按字符截断还可能破坏同版本/同文档来源完整性。
+- 如要改善用户体验，应在 retriever 侧做“有界、可解释的证据选择”：保留 exact lodging rows、reviewed identity/config source、scope clauses 和相关闭包，再按检索排序填充；若仍不完整，继续返回 partial/incomplete 并明确披露截断原因。不能把不完整上下文直接交给模型当作完整 answer。
+
+### D：policy_query 持久化/继承
+
+- `PolicyQuery.coverage` 已支持 `target/all_regions`，`policy_query_dump()` 会保留 all_regions。
+- `slots.py:797-802` 在 policy_explain 的 fact-only update 且未提交新 policy_query 时，已经从旧 subject 复制 policy_query；`slots.py:809` 也把显式的新 query 写回任务。
+- `_scope_expansion_target()` 和 `_coalesce_scope_expansion()` 已将 all_regions 追问识别为同一政策事项的 update，并保留原 subject 的 destination/identity facts；对应测试覆盖 `test_policy_scope_expansion_preserves_confirmed_destination`。
+- 因此在 `graph.py` 再按 `{**prev_query, **curr_query}` 合并存在风险：`current_task` 不是稳定的 subject policy_query 来源；空/default coverage 可能覆盖已有 all_regions；并且会绕过 slots.py 对任务 revision、scope change 和目标唯一性的校验。若仍有真实丢失案例，应先查 slot extraction 的输入/提交结果和 trace，再在 slots 层补回归测试。
+
+### 综合建议
+
+- 优先做 A 的最小安全修复和测试。
+- B 只在 final evidence review 中实现受限版本，并要求重新审核；暂不对普通 reviewer reject 自动发布。
+- C 不按简单切片实现，先建立证据优先级/闭包选择器。
+- D 先用现有 slots.py 测试与真实 trace 复现；当前代码已有继承机制，不建议在 graph.py 重复合并。
+
+## 2026-10-29 A/B 纠偏方案复核
+
+- 用户确认 A 只处理 Tool Call 的 `None`/空白占位，保留动作互斥；评审结论正确。实现应使用 `deepcopy`，只处理已知字符串字段 `question/search_query` 和列表字段 `claims/limitations/requested_fields`，不把任意类型通过 `str()` 强转。
+- 用户确认 B 只在终止 `PolicyEvidenceReview` 有逐条索引、issues 唯一为 `unsupported_claim`、至少保留一条 supported claim 时执行；修剪后必须重新校验引用并重新走证据审核。评审结论正确。建议在 generate 的 final 分支调用独立 helper，不在普通 `PolicyAnswerReview` 拒绝路径处理。
+- C 的证据分层与 D 的 slots 继承判断维持此前结论：不做简单切片，不在 graph 重复合并。
+- 本轮未修改业务代码。

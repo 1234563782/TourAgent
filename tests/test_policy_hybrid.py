@@ -92,6 +92,48 @@ class HybridTests(unittest.TestCase):
                            search_query="适用范围及例外" if decision == "retrieve" else "")
             self.assertEqual(PolicyAnswer.model_validate(value).decision, decision)
 
+    def test_null_placeholders_sanitized_and_invalid_types_rejected(self):
+        valid_claim = {"text": "住宿费标准", "citations": [{"source_id": "S1"}]}
+        # 1. null / whitespace placeholders cleaned to defaults
+        cleaned = PolicyAnswer.model_validate({
+            "decision": "answer",
+            "claims": [valid_claim],
+            "question": None,
+            "search_query": "   ",
+            "limitations": None,
+            "requested_fields": None,
+        })
+        self.assertEqual(cleaned.decision, "answer")
+        self.assertEqual(cleaned.question, "")
+        self.assertEqual(cleaned.search_query, "")
+        self.assertEqual(cleaned.limitations, [])
+        self.assertEqual(cleaned.requested_fields, [])
+
+        # 2. Meaningful mixed actions still rejected
+        with self.assertRaises(ValidationError):
+            PolicyAnswer.model_validate({
+                "decision": "answer",
+                "claims": [valid_claim],
+                "question": "还有一个问题",
+            })
+
+        # 3. partial missing limitations still rejected
+        with self.assertRaises(ValidationError):
+            PolicyAnswer.model_validate({
+                "decision": "partial",
+                "claims": [valid_claim],
+                "limitations": None,
+            })
+
+        # 4. Invalid types (not string/list/null) still rejected
+        for bad_type in ({"question": 123}, {"claims": "not-a-list"}, {"requested_fields": 456}):
+            with self.subTest(bad=bad_type), self.assertRaises(ValidationError):
+                PolicyAnswer.model_validate({
+                    "decision": "answer",
+                    "claims": [valid_claim],
+                    **bad_type,
+                })
+
     def run_query(self, proposals=None, reviews=None, results=None, config=None, facts=None):
         self.store = Mock()
         self.store.search.side_effect = results if results is not None else [result()]
@@ -424,7 +466,7 @@ class HybridTests(unittest.TestCase):
 
     def test_facts_and_sources_cannot_be_replaced_by_model_arguments(self):
         data = self.run_query(proposals=[tool_response("PolicyAnswer", {
-            **answer(), })])
+            **answer(), "company_id": "another-company"})])
         self.assertNotEqual(data["rag"]["status"], "answered")
 
     def test_multiple_tool_calls_rejected(self):

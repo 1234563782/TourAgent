@@ -2,7 +2,8 @@
 
 import inspect
 import json
-from typing import Literal
+from copy import deepcopy
+from typing import Any, Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import Field, ValidationError, model_validator
@@ -57,6 +58,27 @@ class PolicyAnswer(Contract):
     requested_fields: list[str] = Field(default_factory=list, max_length=12,
         description="仅clarify填写实际追问的字段名；如有requirements.missing_fields，只能从中选择。"
                     "其他动作必须为空。question须与所选字段一致，不附带政策结论。")
+
+    @model_validator(mode="before")
+    @classmethod
+    def sanitize_null_placeholders(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        payload = deepcopy(data)
+        string_fields = {"question", "search_query"}
+        list_fields = {"claims", "limitations", "requested_fields"}
+
+        for field in string_fields:
+            if field in payload:
+                value = payload[field]
+                if value is None or (isinstance(value, str) and not value.strip()):
+                    payload[field] = ""
+
+        for field in list_fields:
+            if field in payload and payload[field] is None:
+                payload[field] = []
+
+        return payload
 
     @model_validator(mode="after")
     def consistent_action(self):
@@ -386,6 +408,41 @@ def _review_evidence(model_factory, payload, proposal):
     }
 
 
+def _prune_final_proposal(proposal, review, review_feedback, sources):
+    """Safely prune unsupported claims during final evidence review.
+
+    Only applies in terminal review when the rejection reason is exclusively
+    unsupported claims, at least one claim remains supported, and limitation
+    capacity is not exceeded. Never alters non-unsupported review verdicts or
+    leaks unverified claims into limitations.
+    """
+    if review.verdict != "reject" or review.issues != ["unsupported_claim"]:
+        return None
+    bad_indices = set(review_feedback.get("unsupported_claim_indices", []))
+    if not bad_indices:
+        return None
+    valid_claims = [claim for idx, claim in enumerate(proposal.claims) if idx not in bad_indices]
+    if not valid_claims:
+        return None
+    # Maximum 8 limitations in schema; preserve safety and avoid validation errors.
+    if len(proposal.limitations) >= 8:
+        return None
+    candidate = proposal.model_copy(deep=True)
+    candidate.decision = "partial"
+    candidate.claims = valid_claims
+    candidate.limitations.append(PolicyLimitation(
+        topic="部分结论未发布",
+        reason="missing_evidence",
+        detail="部分结论未通过当前政策证据审核，因此未纳入本次回答。",
+        next_step="如需核实该部分，请补充对应政策条款或查阅当前政策原文。",
+    ))
+    try:
+        _validate_citations(candidate, sources)
+    except PolicyProposalError:
+        return None
+    return candidate
+
+
 @observed("policy_rag")
 def explain_policy(store, model_factory, settings, question, *, facts=None, user_request=None,
                    policy_query=None, request_context=None):
@@ -440,6 +497,14 @@ def explain_policy(store, model_factory, settings, question, *, facts=None, user
                 stage = "policy_review"
                 if final and proposal.decision in {"answer", "partial"}:
                     review, review_feedback = _review_evidence(model_factory, payload, proposal)
+                    if review.verdict == "reject" and review.issues == ["unsupported_claim"]:
+                        pruned = _prune_final_proposal(
+                            proposal, review, review_feedback, payload["sources"])
+                        if pruned is not None:
+                            re_review, re_feedback = _review_evidence(model_factory, payload, pruned)
+                            if re_review.verdict == "accept":
+                                return pruned
+                            review, review_feedback = re_review, re_feedback
                 else:
                     review = _submit(model_factory, "policy_reviewer", PolicyAnswerReview,
                                      _review_prompt(proposal.decision),
