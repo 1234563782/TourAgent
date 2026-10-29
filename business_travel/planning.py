@@ -59,10 +59,10 @@ def run_planner(model, trip, provider, info, policy, memory, settings):
             if kind == "train" and trip.train_service == "high_speed":
                 candidates = [item for item in candidates if re.match(r"^[GDC]\d", item.label)]
             if kind == "hotel":
-                candidates.sort(key=lambda item: _candidate_sort_key(item, recommendation_profile))
+                candidates = _select_top_hotel_candidates(candidates, recommendation_profile, settings.max_candidates)
             else:
                 candidates.sort(key=lambda item: _candidate_sort_key(item, recommendation_profile))
-            candidates = candidates[:settings.max_candidates]
+                candidates = candidates[:settings.max_candidates]
             return {
                 "kind": kind,
                 "inbound": inbound,
@@ -161,8 +161,7 @@ def run_planner(model, trip, provider, info, policy, memory, settings):
                 if any(key not in selection_candidate_ids for key in ids):
                     raise ValueError("candidate_outside_recommendation_pool")
                 proposed = [collected[key] for key in ids]
-                if any(item.kind == "hotel" and item.details.get("hotel_detail", {}).get(
-                        "availability") == "sold_out" for item in proposed):
+                if any(item.kind == "hotel" and _hotel_inventory_state(item) == "sold_out" for item in proposed):
                     raise ValueError("hotel_returned_rates_sold_out")
                 groups = [_group(item) for item in proposed]
                 if len(groups) != len(set(groups)):
@@ -246,6 +245,11 @@ def run_planner(model, trip, provider, info, policy, memory, settings):
                     span.update(status=commute.get("status") if isinstance(commute, dict) else None)
             except Exception as error:
                 commutes[item.id] = {"status": "unavailable", "error_category": type(error).__name__}
+    # Product semantics defense: If selected hotel inventory is unknown, append explicit warning
+    selected_hotel = next((item for item in selected if item.kind == "hotel"), None)
+    if selected_hotel and _hotel_inventory_state(selected_hotel) != "available":
+        warnings.append("Hotel inventory is unconfirmed snapshot; reconfirm actual room availability before booking.")
+
     draft = {
         "id": str(uuid.uuid4()), "request": trip.model_dump(mode="json"),
         "status": "draft" if not missing and timeline["status"] == "consistent" else "incomplete",
@@ -266,14 +270,15 @@ def run_planner(model, trip, provider, info, policy, memory, settings):
     }
     if planning_span is not None:
         def candidate_summary(item):
-            hotel_detail = item.details.get("hotel_detail", {}) if item.kind == "hotel" else {}
+            detail = item.details.get("hotel_detail") if item.kind == "hotel" else None
+            hotel_detail = detail if isinstance(detail, dict) else {}
             return {
                 "id": item.id,
                 "kind": item.kind,
                 "label": item.label,
                 "component": _group(item),
                 "hotel_detail_status": hotel_detail.get("status") if item.kind == "hotel" else None,
-                "hotel_availability": hotel_detail.get("availability") if item.kind == "hotel" else None,
+                "hotel_availability": _hotel_inventory_state(item) if item.kind == "hotel" else None,
             }
 
         planning_span.content(output=lambda: {
@@ -407,8 +412,25 @@ def _selection_candidates(candidates, checks, required, selectable_hotel_ids):
         if group not in required:
             continue
         group_candidates = [item for item in candidates if _group(item) == group]
-        if group == "hotel" and selectable_hotel_ids:
-            group_candidates = [item for item in group_candidates if item.id in selectable_hotel_ids]
+        if group == "hotel":
+            # If there are available hotels that are within_standard, restrict to selectable.
+            # If all selectable hotels are over_standard, allow unknown inventory within_standard
+            # hotels to participate in selection as unconfirmed backups.
+            if selectable_hotel_ids:
+                avail_candidates = [item for item in group_candidates if item.id in selectable_hotel_ids]
+                avail_statuses = {checks[item.id]["status"] for item in avail_candidates}
+                if "within_standard" in avail_statuses or not any(checks[item.id]["status"] == "within_standard" for item in group_candidates):
+                    group_candidates = avail_candidates
+                else:
+                    # Allow within_standard candidates with unknown inventory to be selected,
+                    # but strictly exclude any sold_out hotels.
+                    group_candidates = [
+                        item for item in group_candidates
+                        if item.id in selectable_hotel_ids or (
+                            checks[item.id]["status"] == "within_standard"
+                            and _hotel_inventory_state(item) != "sold_out"
+                        )
+                    ]
         if not group_candidates:
             continue
         statuses = {checks[item.id]["status"] for item in group_candidates}
@@ -454,6 +476,45 @@ def _hotel_inventory_status(candidates, requested):
     if hotels:
         return "unknown"
     return "no_results"
+
+
+def _select_top_hotel_candidates(candidates, profile, max_count):
+    """Tiered selection for hotel candidates before truncation.
+    
+    Strictly prioritizes policy compliance (within_standard) before falling back
+    to unknown or over-standard candidates, avoiding compliant hotels being displaced
+    by luxury over-standard hotels merely carrying an availability snapshot.
+    """
+    if len(candidates) <= max_count:
+        return sorted(candidates, key=lambda item: _candidate_sort_key(item, profile))
+
+    # Safe inventory state lookup
+    def inv_state(item):
+        return _hotel_inventory_state(item)
+
+    # Do not discard sold_out entirely if all are sold_out, but prefer active ones
+    active = [c for c in candidates if inv_state(c) != "sold_out"]
+    pool = active if active else candidates
+
+    checks = {c.id: _recommendation_check(c, profile) for c in pool}
+
+    # Partition by recommendation status
+    tier_within = [c for c in pool if checks[c.id]["status"] == "within_standard"]
+    tier_unknown = [c for c in pool if checks[c.id]["status"] in {"unknown", "unverified"}]
+    tier_over = [c for c in pool if checks[c.id]["status"] == "over_standard"]
+
+    sort_fn = lambda item: _candidate_sort_key(item, profile)
+    tier_within.sort(key=sort_fn)
+    tier_unknown.sort(key=sort_fn)
+    tier_over.sort(key=sort_fn)
+
+    selected = []
+    for bucket in (tier_within, tier_unknown, tier_over):
+        needed = max_count - len(selected)
+        if needed <= 0:
+            break
+        selected.extend(bucket[:needed])
+    return selected
 
 
 def _hotel_candidate_sort_key(item):
