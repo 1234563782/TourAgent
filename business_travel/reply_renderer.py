@@ -8,6 +8,7 @@ from .plan_checks import render_draft
 from .policy_guard import render_policy
 from .task_results import render_task_result
 from .weather import render_weather
+from .approval_forms import render_reimbursement_markdown
 
 
 RENDERABLE_TOOL_NAMES = frozenset({
@@ -57,7 +58,13 @@ def _render_trip(data):
         return "出发日期已过去，请确认新的出发日期。尚未查询行程。"
     if data.get("reason") == "check_in_is_in_the_past":
         return "入住日期已过去，请确认新的入住和退房日期。尚未查询酒店。"
-    return render_draft(data.get("draft"))
+    rendered = render_draft(data.get("draft"))
+    # If the trip is successfully planned with facts, append reimbursement cheat sheet
+    facts = data.get("facts") or {}
+    if data.get("status") == "ok" and facts.get("destination"):
+        summary_text = render_reimbursement_markdown(facts)
+        return f"{rendered}\n\n{summary_text}"
+    return rendered
 
 
 def render_tool_result(name, data):

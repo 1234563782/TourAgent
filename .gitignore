@@ -67,3 +67,11 @@ data/models/*/
 .env.*
 !.env.example
 data/graph/
+
+# Test temp directories and cache
+.tmp-test/
+tmp*/
+pytest-cache-files-*/
+*.sqlite
+.playwright-cli/
+

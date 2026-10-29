@@ -92,3 +92,29 @@
 - 用户确认 B 只在终止 `PolicyEvidenceReview` 有逐条索引、issues 唯一为 `unsupported_claim`、至少保留一条 supported claim 时执行；修剪后必须重新校验引用并重新走证据审核。评审结论正确。建议在 generate 的 final 分支调用独立 helper，不在普通 `PolicyAnswerReview` 拒绝路径处理。
 - C 的证据分层与 D 的 slots 继承判断维持此前结论：不做简单切片，不在 graph 重复合并。
 - 本轮未修改业务代码。
+
+## 2026-10-29 三项方案复核补充
+
+### `.gitignore` 临时目录
+
+- 当前现象属实：`git status` 会因 `.tmp-test/`、`pytest-cache-files-*` 和权限受限目录产生大量 `Permission denied`；但用户级 Git exclude 的权限警告是独立问题，项目 `.gitignore` 不能消除。
+- `git ls-files` 显示 `.tmp-test/e.txt`、`.tmp-test/jieba.cache`、`.tmp-test/o.txt` 已被跟踪，因此新增 ignore 规则不会改变这些文件的跟踪状态；`tmpk5l91ry/memory.sqlite` 也处于已有删除改动，不能把它当作未跟踪垃圾擅自清理。
+- `.tmp-test/` 和 `pytest-cache-files-*/` 方向合理；`tmp*/`、`*.sqlite` 过宽，可能隐藏合法临时命名目录、数据库 fixture 或本地数据，实施前应检查命中清单并优先使用项目根目录限定模式。
+
+### 酒店品牌与 compact
+
+- `tuniu.search_arguments()` 的酒店查询只发送城市、入住/退房日期和入住人数，未发送品牌、星级、早餐过滤条件；供应商返回归一化会保留 `hotelId`、`starName`、`brandName`、`meal`。
+- `candidate_input.py` 的 compact 明确删除 `hotelId`；非空 `brandName` 会保留，品牌为空时才由通用空值压缩删除。当前没有 QueryFields/QueryRequest 的品牌、星级、早餐偏好字段，也没有名为 `preference_checks` 的确定性硬过滤链路。
+- 因此“模型完全看不到品牌”不完全属实；“用户品牌硬约束当前不会被可靠执行”属实。若要实现硬约束，应在 provider 结果进入 `max_candidates` 截断前，依据结构化请求字段完成规范化匹配和过滤，再排序；模型投影可保留非空品牌/星级/餐食作为解释事实，`hotelId` 可继续仅留在内部原始 Candidate 供详情查询。
+
+### 审批/报销导出
+
+- 当前已有结构化 `draft`、`save_trip`（需确认后保存）和 `plan_checks.render_draft()` Markdown 文本渲染；因此“结果只留在聊天气泡和数据库草稿”不应表述为“没有结构化结果”。
+- `web.py` 现有路由覆盖聊天、会话、运行状态、发票预审和附件，没有按用户授权导出行程/审批/报销草稿的 JSON、Markdown 或 PDF 下载接口；用户确实缺少一键交接入口。
+- 行程 draft 可支持第一阶段的行程单 JSON/Markdown 导出，但直接称为“报销单”还缺少学校模板字段、费用归集/项目号、审批状态、发票关联等契约；导出必须标注草稿、待核验、未预订/未审批，不能把政策检查或供应商起价变成已批准金额。
+
+### 结论
+
+- 方案 1：问题真实；规则方向可采纳，但不能原样加入四条宽泛规则，也不能未经授权删除已跟踪文件。
+- 方案 2：问题部分真实、描述过度；应先补齐用户偏好契约和 provider 前的确定性过滤，不能只依赖 compact 保留字段或模型判断。
+- 方案 3：产品缺口真实；建议先定义按 user/task/revision 授权的 JSON/Markdown 导出契约，再评估 PDF 和学校模板适配。
