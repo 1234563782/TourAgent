@@ -37,7 +37,7 @@ class ContextPersistenceTests(unittest.TestCase):
             connection.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(cls.schema)))
 
     def setUp(self):
-        self.identity = MemoryIdentity(self.settings.memory_company_id, uuid4().hex)
+        self.identity = MemoryIdentity(uuid4().hex)
         self.memory = PostgresTravelMemory(self.settings, self.identity)
         self.registry = ConversationStore(self.settings, self.identity)
         self.config = self.new_config()
@@ -86,7 +86,7 @@ class ContextPersistenceTests(unittest.TestCase):
             response = next(message for message in result["messages"] if isinstance(message, ToolMessage))
             self.assertNotIn("会话A专属内容", response.content)
             self.assertIn("会话B读取本会话第一条", response.content)
-        other = MemoryIdentity(self.identity.company_id, uuid4().hex)
+        other = MemoryIdentity(uuid4().hex)
         with open_checkpointer(self.settings, other) as saver:
             self.memory = PostgresTravelMemory(self.settings, other)
             graph = self.graph(saver, [])

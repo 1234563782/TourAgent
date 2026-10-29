@@ -159,8 +159,8 @@ def read_snapshot(directory: Path, legacy_directory: Path, user_id: str) -> Impo
 
 
 def import_snapshot(settings, snapshot: ImportSnapshot) -> dict:
-    identity = MemoryIdentity(settings.memory_company_id, snapshot.user_id)
-    scope = (identity.company_id, identity.user_id)
+    identity = MemoryIdentity(snapshot.user_id)
+    scope = (identity.user_id,)
 
     def remap(config):
         values = dict(config["configurable"])
@@ -175,20 +175,20 @@ def import_snapshot(settings, snapshot: ImportSnapshot) -> dict:
         connection.execute("LOCK TABLE trips,memory_imports,checkpoints,"
                            "checkpoint_blobs,checkpoint_writes IN SHARE ROW EXCLUSIVE MODE")
         done = connection.execute(
-            "SELECT summary FROM memory_imports WHERE company_id=%s AND user_id=%s AND source_digest=%s",
+            'SELECT summary FROM memory_imports WHERE user_id=%s AND source_digest=%s',
             (*scope, snapshot.digest),
         ).fetchone()
         if done:
             return {"status": "already_imported", **done["summary"]}
         for trip in snapshot.trips:
             row = connection.execute(
-                "SELECT data FROM trips WHERE company_id=%s AND user_id=%s AND draft_id=%s",
+                'SELECT data FROM trips WHERE user_id=%s AND draft_id=%s',
                 (*scope, trip["id"]),
             ).fetchone()
             if row and row["data"] != trip:
                 raise MigrationError("目标同 ID 行程内容冲突，已回滚本用户导入；请人工核对")
             connection.execute(
-                "INSERT INTO trips(company_id,user_id,draft_id,data) VALUES(%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+                'INSERT INTO trips(user_id,draft_id,data) VALUES(%s,%s,%s) ON CONFLICT DO NOTHING',
                 (*scope, trip["id"], Jsonb(trip)),
             )
         saver = ScopedPostgresSaver(connection, identity)
@@ -227,14 +227,14 @@ def import_snapshot(settings, snapshot: ImportSnapshot) -> dict:
                 raise MigrationError("检查点、父关系或中间写入核验不一致，已回滚本用户全部导入")
         for trip in snapshot.trips:
             saved = connection.execute(
-                "SELECT data FROM trips WHERE company_id=%s AND user_id=%s AND draft_id=%s",
+                'SELECT data FROM trips WHERE user_id=%s AND draft_id=%s',
                 (*scope, trip["id"]),
             ).fetchone()
             if not saved or saved["data"] != trip:
                 raise MigrationError("行程回读核验失败，已回滚本用户全部导入")
         summary = snapshot.summary()
         connection.execute(
-            "INSERT INTO memory_imports(company_id,user_id,source_digest,summary) VALUES(%s,%s,%s,%s)",
+            'INSERT INTO memory_imports(user_id,source_digest,summary) VALUES(%s,%s,%s)',
             (*scope, snapshot.digest, Jsonb(summary)),
         )
     return {"status": "imported", **summary}

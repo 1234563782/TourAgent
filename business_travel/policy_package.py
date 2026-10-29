@@ -10,7 +10,7 @@ from .policy_lodging import rows_from_snapshot
 from .university_policy import UniversityRules
 
 
-def prepare_package(manifest_path: Path, *, company_id: str) -> PolicyBundle:
+def prepare_package(manifest_path: Path) -> PolicyBundle:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     root = manifest_path.resolve().parent
 
@@ -35,7 +35,7 @@ def prepare_package(manifest_path: Path, *, company_id: str) -> PolicyBundle:
     if len(sources) != 2 or len(body) != 1 or len(attachment) != 1:
         raise ValueError("Expected one body document and one lodging attachment")
     body, attachment = body[0], attachment[0]
-    parsed = parse_docx(paths[body.id], company_id=company_id, policy_key=manifest["policy_key"],
+    parsed = parse_docx(paths[body.id], policy_key=manifest["policy_key"],
                         version=manifest["version"], effective_from=date.fromisoformat(manifest["effective_from"]),
                         chunk_size=manifest["chunk_size"])
     if parsed.source_sha256 != body.sha256:
@@ -70,7 +70,7 @@ def prepare_package(manifest_path: Path, *, company_id: str) -> PolicyBundle:
                                    "cell_range": row.cell_range, "adoption_note": manifest["adoption_note"]}},
             related_ids=[c.id for c in parsed.chunks if c.clause in manifest["attachment_clauses"]]))
     return PolicyBundle(
-        schema_version=2, company_id=company_id, policy_key=manifest["policy_key"],
+        schema_version=2, policy_key=manifest["policy_key"],
         version=manifest["version"], effective_from=manifest["effective_from"],
         effective_to=manifest.get("effective_to"),
         source=manifest["name"], source_sha256=sources_digest(sources), sources=sources,

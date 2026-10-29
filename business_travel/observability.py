@@ -389,7 +389,7 @@ class Telemetry:
             client = self._client()
             if client is not None:
                 from langfuse import propagate_attributes
-                user_ref = self.reference("user", identity.company_id, identity.user_id)
+                user_ref = self.reference("user", identity.user_id)
                 session_ref = self.reference("session", user_ref, session)
                 request_ref = self.reference("request", session_ref, request_id)
                 propagation = propagate_attributes(user_id=user_ref, session_id=session_ref)

@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class AllowanceEstimateTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.bundle = prepare_package(ROOT / "policies/hfut-2026/manifest.json", company_id="test_co")
+        cls.bundle = prepare_package(ROOT / "policies/hfut-2026/manifest.json")
         cls.rules = UniversityRules.model_validate(cls.bundle.rules)
         cls.rows = [LodgingRow.model_validate(row) for row in cls.bundle.lodging_rows]
         cls.doc = {"id": 7, "source": "hfut", "version": cls.bundle.version, "status": "published",

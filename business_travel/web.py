@@ -2,7 +2,9 @@
 
 from contextlib import asynccontextmanager, contextmanager, ExitStack
 from hashlib import sha256
+import logging
 from pathlib import Path
+from threading import BoundedSemaphore
 from urllib.parse import urlsplit
 
 import psycopg
@@ -31,17 +33,26 @@ from .streaming import ChatEventResponse
 from .chat_runs import (ChatRunStore, FINISHED_STATUSES, REVIEW_STATUSES,
                         public_run, request_digest)
 from .run_recovery import RecoveryBody, RecoveryConflict, RecoveryUnavailable, recover_run
-from .resources import execution_resources, AdmissionRejected, CallBudgetExceeded
+from .resources import (execution_resources, AdmissionRejected, CallBudgetExceeded,
+                        RunDeadlineExceeded)
 from .db_pool import close_pools
+from .invoice_contracts import InvoiceBatch
+from .attachment_contracts import AttachmentUpload
+from .attachment_store import AttachmentInputError, PostgresAttachmentStore, inspect_upload
+from .invoice_review import InvoicePolicy, review_upload
+from .invoice_store import PostgresInvoiceStore
 
 STATIC = Path(__file__).resolve().parent / "web_static"
+LOG = logging.getLogger(__name__)
 
 
 class BodyLimitMiddleware:
     """Bound JSON buffering before FastAPI validation, including chunked uploads."""
 
-    def __init__(self, app):
+    def __init__(self, app, invoice_limit=4096, attachment_limit=4096):
         self.app = app
+        self.invoice_limit = invoice_limit
+        self.attachment_limit = attachment_limit
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http" or scope["method"] in {"GET", "HEAD", "OPTIONS"}:
@@ -58,6 +69,10 @@ class BodyLimitMiddleware:
                 scope["path"].startswith("/api/conversations/")
                 and scope["path"].endswith(("/chat", "/chat/stream")))
             limit = 20000 if chat_path else 4096
+            if scope["path"] == "/api/invoices/review":
+                limit = self.invoice_limit
+            if scope["path"] == "/api/attachments/inspect":
+                limit = self.attachment_limit
             if size > limit:
                 return await JSONResponse({"detail": "请求内容过大"}, status_code=413)(scope, receive, send)
             chunks.append(body)
@@ -99,6 +114,15 @@ class ChatBody(BaseModel):
     message: str | None = Field(default=None, min_length=1, max_length=3000)
     resume: StrictBool | None = None
     revision: str | None = Field(default=None, min_length=1, max_length=200)
+    attachment_ids: list[str] = Field(default_factory=list, max_length=20)
+
+    @field_validator("attachment_ids")
+    @classmethod
+    def valid_attachment_ids(cls, value):
+        import re
+        if len(set(value)) != len(value) or any(not re.fullmatch(r"[0-9a-f]{32}", item) for item in value):
+            raise ValueError("Invalid attachment IDs")
+        return value
 
     @model_validator(mode="after")
     def valid_action(self):
@@ -110,14 +134,17 @@ class ChatBody(BaseModel):
                 raise ValueError("Invalid message")
         elif self.revision is None:
             raise ValueError("Confirmation revision required")
+        if self.resume is not None and self.attachment_ids:
+            raise ValueError("Confirmation cannot include attachments")
         return self
 
 
 @contextmanager
 def conversation_lock(settings, identity, conversation_id="web"):
     # Session locks span model calls and work across multiple web workers.
+    # The schema is part of the key: advisory locks are database-wide.
     key = int.from_bytes(sha256(
-        f"travel_conversation:{identity.thread_id(conversation_id)}".encode()
+        f"travel_conversation:{settings.memory_schema}:{identity.thread_id(conversation_id)}".encode()
     ).digest()[:8], signed=True)
     with memory_connection(settings, lane="session") as connection:
         acquired = connection.execute(
@@ -127,7 +154,18 @@ def conversation_lock(settings, identity, conversation_id="web"):
         try:
             yield connection
         finally:
-            connection.execute("SELECT pg_advisory_unlock(%s)", (key,))
+            try:
+                connection.execute("SELECT pg_advisory_unlock(%s)", (key,))
+            except Exception:
+                # A failed unlock must not mask the execution result. The pool
+                # will discard the broken session on return; PostgreSQL releases
+                # its advisory locks when that session closes.
+                LOG.warning("Unable to release conversation lock; discarding connection",
+                            exc_info=True)
+                try:
+                    connection.close()
+                except Exception:
+                    LOG.debug("Unable to close failed conversation connection", exc_info=True)
 
 
 def chat_snapshot(state):
@@ -139,7 +177,14 @@ def chat_snapshot(state):
             if answer is not None:
                 messages.append({"role": "assistant", "text": answer})
             answer = None
-            messages.append({"role": "user", "text": item.content})
+            entry = {"role": "user", "text": item.content}
+            attachments = [{key: attachment[key] for key in (
+                "attachment_id", "filename", "attachment_kind", "attachment_status") if key in attachment}
+                for attachment in (item.additional_kwargs or {}).get("attachments", [])
+                if isinstance(attachment, dict)]
+            if attachments:
+                entry["attachments"] = attachments
+            messages.append(entry)
         elif isinstance(item, AIMessage) and not item.tool_calls and isinstance(item.content, str):
             if item.content:
                 answer = item.content
@@ -152,12 +197,20 @@ def chat_snapshot(state):
             "revision": (state.config or {}).get("configurable", {}).get("checkpoint_id")}
 
 
-def create_app(settings=None, auth_config=None, store=None):
+def create_app(settings=None, auth_config=None, store=None, *, invoice_store_factory=None,
+               attachment_store_factory=None):
     settings = settings or Settings.from_env()
     auth_config = auth_config or AuthSettings.from_env()
     store = store or AuthStore(settings, auth_config)
     telemetry = Telemetry(settings)
     settings.validate_resources()
+    settings.validate_invoices()
+    invoice_store_factory = invoice_store_factory or PostgresInvoiceStore
+    attachment_store_factory = attachment_store_factory or PostgresAttachmentStore
+    # This is only a per-process backpressure gate. PostgreSQL remains the
+    # cross-process source of truth for the actual execution slots.
+    local_request_gate = BoundedSemaphore(
+        settings.resource_global_concurrency + settings.resource_queue_size)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -180,7 +233,8 @@ def create_app(settings=None, auth_config=None, store=None):
 
     app = FastAPI(title="高校差旅账号服务", docs_url=None, redoc_url=None,
                   openapi_url=None, lifespan=lifespan)
-    app.add_middleware(BodyLimitMiddleware)
+    app.add_middleware(BodyLimitMiddleware, invoice_limit=settings.invoice_request_bytes,
+                       attachment_limit=settings.attachment_request_bytes)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=[urlsplit(auth_config.origin).hostname])
 
     @app.middleware("http")
@@ -249,17 +303,86 @@ def create_app(settings=None, auth_config=None, store=None):
 
     @app.get("/api/auth/me")
     def me(user=Depends(current_user)):
-        return user
+        return {key: user[key] for key in ("user_id", "username")}
 
     @app.get("/api/memory")
     def memory(request: Request, user=Depends(current_user)):
         if request.query_params:
             raise HTTPException(400, "此接口不接受身份或查询参数")
-        identity = MemoryIdentity(user["company_id"], user["user_id"])
+        identity = MemoryIdentity(user["user_id"])
         return PostgresTravelMemory(settings, identity).read()
 
+    @app.get("/api/invoices/config")
+    def invoice_config(user=Depends(current_user)):
+        return {"max_file_bytes": settings.invoice_max_file_bytes,
+                "max_batch_files": settings.invoice_max_batch_files,
+                "supported": ["UTF-8 EInvoice 0.32 XML / digital VAT"],
+                "buyer_configured": bool(settings.invoice_buyer_name and settings.invoice_buyer_tax_id)}
+
+    @app.post("/api/invoices/review")
+    def invoice_review(body: InvoiceBatch, request: Request, user=Depends(current_user)):
+        if request.query_params:
+            raise HTTPException(400, "此接口不接受身份或查询参数")
+        if len(body.files) > settings.invoice_max_batch_files:
+            raise HTTPException(413, "文件数量超过批次上限，请分批提交")
+        identity = MemoryIdentity(user["user_id"])
+        from .personnel import PersonnelProfile
+        profile = store.get_personnel(identity.user_id,) or PersonnelProfile()
+        policy = InvoicePolicy(settings)
+        registry = invoice_store_factory(settings, identity)
+        results = [review_upload(upload, settings=settings, registry=registry,
+                                 policy=policy, profile=profile).model_dump(mode="json")
+                   for upload in body.files]
+        return {"results": results, "verification_status": "not_checked", "approved": False}
+
+    @app.get("/api/attachments/config")
+    def attachment_config(user=Depends(current_user)):
+        return {"max_file_bytes": settings.attachment_max_file_bytes,
+                "max_files": settings.attachment_max_files,
+                "supported": ["UTF-8 EInvoice 0.32 XML / digital VAT"],
+                "notice": "附件仅保存并解析，尚未自动用于聊天费用核对；请用发票预审入口核对票面。"}
+
+    @app.post("/api/attachments/inspect")
+    def attachment_inspect(body: AttachmentUpload, request: Request, user=Depends(current_user)):
+        if request.query_params:
+            raise HTTPException(400, "此接口不接受身份或查询参数")
+        identity = MemoryIdentity(user["user_id"])
+        try:
+            result = inspect_upload(body, settings=settings,
+                                    store=attachment_store_factory(settings, identity))
+        except AttachmentInputError as error:
+            raise HTTPException(422, str(error)) from None
+        except Exception:
+            raise HTTPException(503, "附件保存失败；请管理员检查存储并运行 init-attachments 后重试。") from None
+        return result.model_dump(mode="json")
+
+    @app.get("/api/attachments/{attachment_id}")
+    def attachment_detail(attachment_id: str, request: Request, user=Depends(current_user)):
+        if request.query_params:
+            raise HTTPException(400, "此接口不接受身份或查询参数")
+        identity = MemoryIdentity(user["user_id"])
+        try:
+            return attachment_store_factory(settings, identity).get(attachment_id).model_dump(mode="json")
+        except LookupError:
+            raise HTTPException(404, "附件不存在或无权访问") from None
+        except Exception:
+            raise HTTPException(503, "附件记录暂不可用，请联系管理员检查存储。") from None
+
     def conversation_store(user):
-        return ConversationStore(settings, MemoryIdentity(user["company_id"], user["user_id"]))
+        return ConversationStore(settings, MemoryIdentity(user["user_id"]))
+
+    @contextmanager
+    def local_request_slot(body):
+        # GET/history requests do not enter the expensive execution path.
+        if body is None:
+            yield
+            return
+        if not local_request_gate.acquire(blocking=False):
+            raise AdmissionRejected("local_backpressure", settings.resource_queue_timeout)
+        try:
+            yield
+        finally:
+            local_request_gate.release()
 
     @app.get("/api/conversations")
     def conversations(request: Request, offset: int = Query(default=0, ge=0),
@@ -287,13 +410,13 @@ def create_app(settings=None, auth_config=None, store=None):
                                PostgresTravelMemory(settings, identity), PolicyStore.from_settings(settings),
                                checkpointer=checkpointer, provider=provider,
                                information=InformationProvider(settings),
-                               personnel_profile=store.get_personnel(identity.user_id))
+                               personnel_profile=store.get_personnel(identity.user_id,))
 
     def recovery_action(request, user, conversation_id, body=None):
         if request.query_params:
             raise HTTPException(400, "此接口不接受查询参数")
         owned_conversation(user, conversation_id)
-        identity = MemoryIdentity(user["company_id"], user["user_id"])
+        identity = MemoryIdentity(user["user_id"])
         try:
             with conversation_lock(settings, identity, conversation_id):
                 ChatRunStore(settings, identity, conversation_id).interrupt_orphans()
@@ -321,7 +444,7 @@ def create_app(settings=None, auth_config=None, store=None):
         if request.query_params:
             raise HTTPException(400, "此接口不接受查询参数")
         owned_conversation(user, conversation_id)
-        identity = MemoryIdentity(user["company_id"], user["user_id"])
+        identity = MemoryIdentity(user["user_id"])
         runs = ChatRunStore(settings, identity, conversation_id)
         # Acquiring the same lock proves no current executor owns these rows.
         try:
@@ -350,17 +473,32 @@ def create_app(settings=None, auth_config=None, store=None):
     def run_chat(request, user, body=None, conversation_id=None, emit=None):
         if request.query_params:
             raise HTTPException(400, "此接口不接受身份或查询参数")
-        identity = MemoryIdentity(user["company_id"], user["user_id"])
+        identity = MemoryIdentity(user["user_id"])
         ident = conversation_id or "web"
         registry, metadata = owned_conversation(user, ident)
+        attachments = None
+        attachment_metadata = []
+        if body is not None and body.attachment_ids:
+            if len(body.attachment_ids) > settings.attachment_max_files:
+                raise HTTPException(422, "附件数量超过当前上限，请分批发送")
+            try:
+                attachments = attachment_store_factory(settings, identity)
+                attachment_metadata = attachments.load_for_chat(body.attachment_ids)
+            except LookupError:
+                raise HTTPException(404, "附件不存在或无权访问") from None
+            except Exception:
+                raise HTTPException(503, "附件记录暂不可用，请联系管理员检查存储。") from None
         runs = ChatRunStore(settings, identity, ident)
         config = {"configurable": {"thread_id": identity.thread_id(ident)},
                   "recursion_limit": 30}
         try:
-            with ExitStack() as execution:
+            with local_request_slot(body), ExitStack() as execution:
                 lock_connection = execution.enter_context(conversation_lock(settings, identity, ident))
-                checkpointer = execution.enter_context(open_checkpointer(settings, identity))
-                runs.interrupt_orphans()
+                # Reuse the conversation-lock session for checkpoint access. A
+                # waiting request therefore does not consume a second long-lived
+                # connection before it reaches admission.
+                checkpointer = execution.enter_context(
+                    open_checkpointer(settings, identity, connection=lock_connection))
                 latest = runs.latest()
                 graph = assistant_graph(identity, checkpointer)
                 existing = runs.get(body.request_id) if body else None
@@ -395,13 +533,19 @@ def create_app(settings=None, auth_config=None, store=None):
                     else:
                         if current["interrupt"]:
                             raise HTTPException(409, "请先确认或取消当前待处理事项")
-                        action = {"messages": [HumanMessage(content=body.message)]}
+                        action = {"messages": [HumanMessage(content=body.message,
+                            additional_kwargs={"attachments": attachment_metadata})]}
                     budget = execution.enter_context(execution_resources(settings, identity, lock_connection))
+                    # Rejected requests must not touch history: only an admitted run
+                    # may retire rows orphaned by a crashed executor.
+                    runs.interrupt_orphans()
                     runs.start(body.request_id, request_digest(body), current["revision"])
                     with telemetry.request(config, identity, ident, body.request_id) as (trace, traced_config):
                         try:
                             prior_messages = list(current["messages"])
                             trace.content(input={"message": body.message, "resume": body.resume})
+                            if attachments is not None:
+                                attachments.link_message(ident, body.request_id, body.attachment_ids)
                             registry.touch(ident, body.message)
                             if emit:
                                 emit("progress", {**progress_event("accepted"), "run_id": body.request_id})
@@ -411,6 +555,10 @@ def create_app(settings=None, auth_config=None, store=None):
                                     runs.progress(body.request_id, data["stage"])
                                 if emit:
                                     emit(kind, {**data, "run_id": body.request_id})
+                            # A graph can spend time in a non-model tool/provider
+                            # step. Do not commit a completed checkpoint after the
+                            # request deadline even when no further model call is made.
+                            budget.check_deadline()
                             if budget.exhausted:
                                 raise CallBudgetExceeded("request_model_call_quota_exceeded")
                             current = chat_snapshot(graph.get_state(config))
@@ -446,11 +594,14 @@ def create_app(settings=None, auth_config=None, store=None):
                 "user_concurrency": "您的其他会话正在执行，请稍后再发送。本次尚未执行。",
                 "queue_full": "当前请求过多，等待队列已满。本次尚未执行，请稍后再试。",
                 "queue_timeout": "等待执行超时。本次尚未执行，请稍后再试。",
+                "local_backpressure": "当前服务入口繁忙，本次尚未执行，请稍后再试。",
                 "daily_quota": "今日请求或模型调用配额不足。本次尚未执行，请等待配额重置或联系管理员。",
             }
             raise HTTPException(429, messages[error.reason], headers={
                 "Retry-After": str(error.retry_after), "X-Travel-Admission": "rejected",
             }) from None
+        except RunDeadlineExceeded:
+            raise HTTPException(503, "本轮执行超过时长上限，请刷新核实执行记录后使用恢复入口") from None
         except CallBudgetExceeded:
             raise HTTPException(503, "本轮模型调用已达上限，请刷新核实执行记录后使用恢复入口") from None
         except HTTPException:

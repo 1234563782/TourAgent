@@ -33,7 +33,7 @@ class ConversationTests(test_web_chat.ChatTests):
         self.assertEqual(result.status_code, 200)
         self.assertEqual(result.json()["conversation_id"], self.ident)
         self.assertEqual(self.graph.stream.call_args.args[1]["configurable"]["thread_id"],
-                         "company:verified:" + self.ident)
+                         "verified:" + self.ident)
         self.registry.require.assert_called_once_with(self.ident)
         self.assertEqual(self.factory_mock.call_args.args[1].user_id, "verified")
         self.assertEqual(self.mocks[0].call_args.args[2], self.ident)

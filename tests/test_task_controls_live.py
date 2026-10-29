@@ -40,7 +40,7 @@ class TaskControlLiveTests(unittest.TestCase):
             connection.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(cls.schema)))
 
     def setUp(self):
-        self.identity = MemoryIdentity(self.settings.memory_company_id, uuid4().hex)
+        self.identity = MemoryIdentity(uuid4().hex)
         self.memory = PostgresTravelMemory(self.settings, self.identity)
         self.registry = ConversationStore(self.settings, self.identity)
         self.conversation = self.registry.create()["id"]
@@ -72,7 +72,7 @@ class TaskControlLiveTests(unittest.TestCase):
             other_conversation = {"configurable": {
                 "thread_id": self.identity.thread_id(self.registry.create()["id"])}}
             self.assertFalse(graph.get_state(other_conversation).values)
-        other = MemoryIdentity(self.identity.company_id, uuid4().hex)
+        other = MemoryIdentity(uuid4().hex)
         with open_checkpointer(self.settings, other) as saver:
             other_graph = build_assistant(self.models([]), self.settings,
                 PostgresTravelMemory(self.settings, other), PolicyStore(None, None),
@@ -106,8 +106,7 @@ class TaskControlLiveTests(unittest.TestCase):
         factory = self.models([
             slot_response({"destination": "B"}, "plan_trip", scope="hotel"), control_response("cancel")])
         auth = Mock()
-        auth.current_user.return_value = {"company_id": self.identity.company_id,
-                                         "user_id": self.identity.user_id, "username": "fixture"}
+        auth.current_user.return_value = {"user_id": self.identity.user_id, "username": "fixture"}
         origin = "http://127.0.0.1:8000"
         route = f"/api/conversations/{self.conversation}/chat"
         def build(*args, **kwargs):

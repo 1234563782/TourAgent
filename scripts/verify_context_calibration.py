@@ -92,7 +92,7 @@ def main():
             ("planner", f"Synthetic test {marker}. Do not call tools. Reply only OK. "
              '{"city":"Example","dates":["2099-01-01","2099-01-02"],"budget":123}'),
         ]
-        with service.request({}, MemoryIdentity("synthetic-company", marker), marker, uuid4().hex) as (root, config):
+        with service.request({}, MemoryIdentity(marker), marker, uuid4().hex) as (root, config):
             if root.raw is None:
                 raise RuntimeError("trace unavailable")
             report["trace_id"] = root.raw.trace_id

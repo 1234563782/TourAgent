@@ -10,6 +10,15 @@
 入口为 `business_travel.web:create_app`，详见 [Web 登录说明](docs/web-auth.md)。
 旧 AgentScope 入口、配置、插件和专属测试已删除。
 
+工作台新增独立的 **XML 发票预审**：确定性票面校验、本系统查重、字段来源和补充费用后的差标测算。
+首版仅支持已适配的 UTF-8 `EInvoice 0.32` 通用增值税 XML，不支持任意 PDF/OFD/扫描件，
+不进行官方验真、验签或报销批准。部署前需显式初始化票据表，见 [发票预审第一版](docs/invoice-review.md)。
+
+聊天支持先上传附件再发送文字。附件通过 /api/attachments/inspect 生成账号私有的 attachment_id，
+聊天请求携带 attachment_ids 并在服务端重新校验用户归属。P0 会保存原件、哈希、解析状态和消息关联；
+无关 XML 会被标记为 xml_other，不会注册为发票。P0 不把票面字段自动写入 ExpenseFacts，也不把上传内容伪装成用户原话证据；
+差标和冲突处理属于后续 P1。部署时运行 python scripts/auth_admin.py init-attachments（或全新部署的 init）。
+
 ## 架构
 
 JEV 的基础用法、单意图到多意图的演进、任务路由和验证边界，见
@@ -84,7 +93,6 @@ py -3.12 -m venv .venv
 | `policy_admin.py migrate-hnsw` | 为已有政策数据库创建当前 Embedding 维度对应的 HNSW 索引 |
 | `AMAP_API_KEY` | 高德地图密钥，可选 |
 | `TRAVEL_MEMORY_DATABASE_URL` | PostgreSQL 记忆连接串；留空复用政策数据库 |
-| `TRAVEL_MEMORY_COMPANY_ID` | 组织标识（沿用字段名）；留空复用政策组织，须与政策组织一致 |
 | `TRAVEL_MEMORY_SCHEMA` | 记忆专用 schema，默认 `travel_memory` |
 
 程序自动读取项目根目录 `.env`，不依赖终端当前目录；系统环境变量优先（包括空值）。
@@ -118,8 +126,8 @@ Qwen 重排的接口配置、回退与对照实验也见该说明的“Qwen API 
 | `/clear` | 开始新会话，不删除历史记录 |
 | `/exit` | 退出 |
 
-同一组织部署下使用相同 `--user` 和 `--session` 可恢复对应会话。
-存储已按组织/用户/会话隔离，但 CLI 用户标签不是身份认证，不可直接暴露为多用户服务。
+单学校部署下使用相同 `--user` 和 `--session` 可恢复对应会话。
+存储已按用户/会话隔离，但 CLI 用户标签不是身份认证，不可直接暴露为多用户服务。
 切换政策后应新开会话；历史企业事项、已保存结果不自动改写为学校结果。
 
 ## 验证
@@ -175,3 +183,5 @@ TourAgent/
   范围及限制见[结构化槽位验收报告](docs/结构化槽位验收报告_2026-09-09.md)，不代表所有输入均可靠。
 - 不支持订票、支付、退改、报销提交或审批。
 - 旧数据、政策参考文本和历史测试报告保留；`.claude/skills/ask-question/data/documents/` 中的资料不会自动当作有效企业政策加载。
+
+已有数据库升级前请先阅读 [单学校迁移说明](docs/single-school-migration.md)，停服备份并完成两个目标迁移后再启动新代码。

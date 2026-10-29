@@ -37,7 +37,7 @@ const state = { conversation_id: conversation.id, messages: [{ role: "assistant"
         return route.fulfill({ path: path.join(root, "business_travel", "web_static", name),
           contentType: name.endsWith(".js") ? "text/javascript" : name.endsWith(".css") ? "text/css" : "image/svg+xml" });
       }
-      if (pathname === "/api/auth/me") return json({ username: "引用验收", company_id: "fixture", user_id: "fixture" });
+      if (pathname === "/api/auth/me") return json({ username: "引用验收", user_id: "fixture" });
       if (pathname === "/api/memory") return json({ trip_history: [] });
       if (pathname === "/api/conversations") return json({ items: [conversation], next_offset: null });
       if (pathname.endsWith("/runs")) return json({ run: null });

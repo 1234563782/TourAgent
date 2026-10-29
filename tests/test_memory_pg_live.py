@@ -47,7 +47,7 @@ class PostgresIntegrationTests(unittest.TestCase):
             connection.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(cls.schema)))
 
     def setUp(self):
-        self.identity = MemoryIdentity(self.settings.memory_company_id, "test_" + uuid.uuid4().hex)
+        self.identity = MemoryIdentity("test_" + uuid.uuid4().hex)
         self.memory = PostgresTravelMemory(self.settings, self.identity)
         self.config = {"configurable": {"thread_id": self.identity.thread_id("same")}}
 
@@ -137,13 +137,11 @@ class PostgresIntegrationTests(unittest.TestCase):
         self.memory.save_trip(draft)
         self.assertEqual(PostgresTravelMemory(self.settings, self.identity).read(),
                          {"trip_history": [draft]})
-        other = MemoryIdentity(self.identity.company_id, "different")
+        other = MemoryIdentity("different")
         self.assertEqual(PostgresTravelMemory(self.settings, other).read(), {"trip_history": []})
-        other_settings = replace(self.settings, memory_company_id="other_company")
-        other_memory = PostgresTravelMemory(
-            other_settings, MemoryIdentity("other_company", self.identity.user_id))
+        other_memory = PostgresTravelMemory(self.settings, MemoryIdentity("another_user"))
         self.assertEqual(other_memory.read(), {"trip_history": []})
-        other_memory.save_trip({"id": "other-company-trip"})
+        other_memory.save_trip({"id": "other-user-trip"})
         self.assertEqual(self.memory.read(), {"trip_history": [draft]})
 
     def test_trips_are_idempotent_ordered_bounded_and_conflicts_preserve_original(self):
@@ -183,9 +181,9 @@ class PostgresIntegrationTests(unittest.TestCase):
             graph.invoke({"messages": [HumanMessage(content="Private question")]}, self.config)
             clear = {"configurable": {"thread_id": self.identity.thread_id("new_session")}}
             self.assertEqual(graph.get_state(clear).values, {})
-        for company, user in ((self.identity.company_id, "other"), ("other_company", self.identity.user_id)):
-            identity = MemoryIdentity(company, user)
-            settings = replace(self.settings, memory_company_id=company)
+        for user in ("other",):
+            identity = MemoryIdentity(user)
+            settings = replace(self.settings)
             with open_checkpointer(settings, identity) as saver:
                 with self.assertRaises(PermissionError):
                     saver.get_tuple(self.config)

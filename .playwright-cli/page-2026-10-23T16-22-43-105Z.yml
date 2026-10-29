@@ -1,0 +1,191 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - link "Aligo 首页" [ref=e3] [cursor=pointer]:
+      - /url: /
+      - generic [ref=e4]: Aligo 高校差旅
+    - generic [ref=e5]: 个人工作台
+  - main [ref=e6]:
+    - region [ref=e20]:
+      - generic [ref=e21]:
+        - generic [ref=e22]:
+          - paragraph [ref=e23]: MY WORKSPACE
+          - heading "我的差旅" [level=1] [ref=e24]
+        - generic [ref=e25]:
+          - generic [ref=e26]: admin
+          - button "退出登录" [ref=e27] [cursor=pointer]
+      - generic [ref=e28]:
+        - generic [ref=e29]:
+          - term [ref=e30]: 组织
+          - definition [ref=e31]: agent-demo
+        - generic [ref=e32]:
+          - term [ref=e33]: 用户 ID
+          - definition [ref=e34]: 2b0107d755c24b8abdf6157e9c07896b
+      - region [ref=e35]:
+        - generic [ref=e36]:
+          - heading "差旅助手" [level=2] [ref=e37]
+          - button "刷新会话" [ref=e38] [cursor=pointer]
+        - generic [ref=e39]:
+          - complementary "历史对话" [ref=e40]:
+            - button "新对话" [ref=e41] [cursor=pointer]
+            - navigation "选择对话" [ref=e42]:
+              - button [ref=e563] [cursor=pointer]:
+                - text: 新对话
+                - time [ref=e564]: 10/24 00:22
+              - button [ref=e565] [cursor=pointer]:
+                - text: 取消这个查询
+                - time [ref=e566]: 10/24 00:15
+              - button [ref=e567] [cursor=pointer]:
+                - text: 帮我查2026-11-16南京到北京的机票，并记住我不坐红眼航班
+                - time [ref=e568]: 10/24 00:11
+              - button [ref=e569] [cursor=pointer]:
+                - text: 普通人员坐高铁有哪些席别可以选择
+                - time [ref=e570]: 10/24 00:06
+              - button [ref=e571] [cursor=pointer]:
+                - text: 查看我刚才保存的行程
+                - time [ref=e572]: 10/24 00:03
+              - button [ref=e573] [cursor=pointer]:
+                - text: nihao
+                - time [ref=e574]: 10/23 20:39
+              - button [ref=e575] [cursor=pointer]:
+                - text: 你是谁
+                - time [ref=e576]: 10/20 09:21
+              - button [ref=e577] [cursor=pointer]:
+                - text: 你好
+                - time [ref=e578]: 10/20 09:20
+              - button [ref=e579] [cursor=pointer]:
+                - text: 你好
+                - time [ref=e580]: 10/20 09:18
+              - button [ref=e581] [cursor=pointer]:
+                - text: 你好
+                - time [ref=e582]: 10/20 00:23
+              - button [ref=e583] [cursor=pointer]:
+                - text: 帮我查长沙到郑州的机票，另外解释一下学校的住宿报销标准。
+                - time [ref=e584]: 10/19 09:28
+              - button [ref=e585] [cursor=pointer]:
+                - text: 帮我查长沙到郑州的机票，另外解释一下学校的住宿报销标准。
+                - time [ref=e586]: 10/19 09:22
+              - button [ref=e587] [cursor=pointer]:
+                - text: 帮我查长沙到郑州的机票，另外解释一下学校的住宿报销标准。
+                - time [ref=e588]: 10/18 23:29
+              - button [ref=e589] [cursor=pointer]:
+                - text: 帮我查长沙到郑州的机票，另外解释一下学校的住宿报销标准。
+                - time [ref=e590]: 10/18 22:39
+              - button [ref=e591] [cursor=pointer]:
+                - text: 我是院士，去上海出差，我的住宿标准是多少
+                - time [ref=e592]: 10/18 22:02
+              - button [ref=e593] [cursor=pointer]:
+                - text: 我是院士，我的住宿标准是多少的
+                - time [ref=e594]: 10/18 21:53
+              - button [ref=e595] [cursor=pointer]:
+                - text: 我是院士，我的住宿标准是多少
+                - time [ref=e596]: 10/18 21:46
+              - button [ref=e597] [cursor=pointer]:
+                - text: 我是院士，我的住宿标准是多少
+                - time [ref=e598]: 10/18 21:10
+              - button [ref=e599] [cursor=pointer]:
+                - text: 我是院士，我的住宿标准是多少
+                - time [ref=e600]: 10/18 21:02
+              - button [ref=e601] [cursor=pointer]:
+                - text: 我是院士，我的住宿标准是多少
+                - time [ref=e602]: 10/18 20:07
+              - button [ref=e603] [cursor=pointer]:
+                - text: 你好
+                - time [ref=e604]: 10/18 20:06
+              - button [ref=e605] [cursor=pointer]:
+                - text: 我是院士，我的住宿标准是多少
+                - time [ref=e606]: 10/18 19:50
+              - button [ref=e607] [cursor=pointer]:
+                - text: 新对话
+                - time [ref=e608]: 10/18 19:38
+              - button [ref=e609] [cursor=pointer]:
+                - text: 我是院士，帮我查一下我的住宿标准是多少
+                - time [ref=e610]: 10/18 17:57
+              - button [ref=e611] [cursor=pointer]:
+                - text: 我是院士，帮我查一下我的住宿标准是多少
+                - time [ref=e612]: 10/18 16:39
+              - button [ref=e613] [cursor=pointer]:
+                - text: 我是院士，帮我查一下我的住宿标准是多少
+                - time [ref=e614]: 10/18 16:12
+              - button [ref=e615] [cursor=pointer]:
+                - text: 我是院士去北京出差，帮我查一下住宿标准是多少
+                - time [ref=e616]: 10/18 15:58
+              - button [ref=e617] [cursor=pointer]:
+                - text: 我是院士，我准备出差，从南京到北京，明天出发，后天回来，住宿也是明天入住，后天退房，帮我查一下酒店和交通，按照我的标准
+                - time [ref=e618]: 10/18 15:51
+              - button [ref=e619] [cursor=pointer]:
+                - text: 我是院士，我准备出差，从南京到北京，明天出发，后天回来，住宿也是明天入住，后天退房，帮我查一下酒店和交通，按照我的标准
+                - time [ref=e620]: 10/18 14:51
+              - button [ref=e621] [cursor=pointer]:
+                - text: 我是院士，我准备出差，从南京到北京，明天出发，后天回来，住宿也是明天入住，后天退房，帮我查一下酒店和交通，按照我的标准
+                - time [ref=e622]: 10/18 14:25
+              - button [ref=e623] [cursor=pointer]:
+                - text: 我是院士，我准备出差，从南京到北京，明天出发，后天回来，住宿也是明天入住，后天退房，帮我查一下酒店和交通，按照我的标准
+                - time [ref=e624]: 10/18 14:09
+              - button [ref=e625] [cursor=pointer]:
+                - text: 我是院士，我准备出差，从南京到北京，明天出发，后天回来，住宿也是明天入住，后天退房，帮我查一下酒店和交通，按照我的标准
+                - time [ref=e626]: 10/18 13:41
+              - button [ref=e627] [cursor=pointer]:
+                - text: 新对话
+                - time [ref=e628]: 10/18 13:40
+              - button [ref=e629] [cursor=pointer]:
+                - text: 我是院士，我准备出差，从南京到北京，明天出发，后天回来，住宿也是明天入住，后天退房，帮我查一下酒店和交通，按照我的标准
+                - time [ref=e630]: 10/18 13:26
+              - button [ref=e631] [cursor=pointer]:
+                - text: 我是院士，我准备出差，从南京到北京，明天出发，后天回来，住宿也是明天入住，后天退房，帮我查一下酒店和交通，按照我的标准
+                - time [ref=e632]: 10/17 00:44
+              - button [ref=e633] [cursor=pointer]:
+                - text: 我是院士，我准备出差，从南京到北京，明天出发，后天回来，住宿也是明天入住，后天退房，帮我查一下酒店和交通，按照我的标准
+                - time [ref=e634]: 10/16 23:12
+              - button [ref=e635] [cursor=pointer]:
+                - text: 我是院士，我准备出差，从南京到北京，明天出发，后天回来，住宿也是明天入住，后天退房，帮我查一下酒店和交通，按照我的标准
+                - time [ref=e636]: 10/16 21:59
+              - button [ref=e637] [cursor=pointer]:
+                - text: 我是院士，我准备出差，从南京到北京，明天出发，后天回来，住宿也是明天入住，后天退房，帮我查一下酒店和交通，按照我的标准
+                - time [ref=e638]: 10/16 10:28
+              - button [ref=e639] [cursor=pointer]:
+                - text: 我准备出差，从南京到北京，明天出发，后天回来，住宿也是明天入住，后天退房，帮我查一下酒店和交通
+                - time [ref=e640]: 10/16 10:26
+              - button [ref=e641] [cursor=pointer]:
+                - text: 我准备出差，从南京到北京，明天出发，后天回来，住宿也是明天入住，后天退房，帮我查一下酒店和交通
+                - time [ref=e642]: 10/16 09:59
+              - button [ref=e643] [cursor=pointer]:
+                - text: 我准备出差，从南京到北京，明天出发，后天回来，住宿也是明天入住，后天退房，帮我查一下酒店和交通
+                - time [ref=e644]: 10/13 19:24
+              - button [ref=e645] [cursor=pointer]:
+                - text: 我准备出差，从南京到北京，明天出发，后天回来，住宿也是明天入住，后天退房，帮我查一下酒店和交通
+                - time [ref=e646]: 10/11 00:09
+              - button [ref=e647] [cursor=pointer]:
+                - text: 你好
+                - time [ref=e648]: 10/11 00:07
+              - button [ref=e649] [cursor=pointer]:
+                - text: 你好
+                - time [ref=e650]: 10/10 23:44
+              - button [ref=e651] [cursor=pointer]:
+                - text: 你好
+                - time [ref=e652]: 10/10 23:42
+              - button [ref=e653] [cursor=pointer]:
+                - text: 你好
+                - time [ref=e654]: 10/10 23:25
+              - button [ref=e655] [cursor=pointer]:
+                - text: 你好
+                - time [ref=e656]: 10/10 23:09
+              - button [ref=e657] [cursor=pointer]:
+                - text: 你好
+                - time [ref=e658]: 10/10 16:30
+              - button [ref=e659] [cursor=pointer]:
+                - text: 你好
+                - time [ref=e660]: 10/10 16:28
+              - button [ref=e661] [cursor=pointer]:
+                - text: 我准备出差，从南京到北京，明天出发，后天回来，住宿也是明天入住，后天退房，帮我查一下酒店和交通
+                - time [ref=e662]: 10/10 14:59
+            - button "更多对话" [ref=e143] [cursor=pointer]
+          - generic [ref=e144]:
+            - heading "新对话" [level=3] [ref=e254]
+            - status [ref=e150]
+            - generic [ref=e151]:
+              - textbox "消息" [ref=e152]:
+                - /placeholder: 输入消息
+              - button "发送" [ref=e153] [cursor=pointer]
+  - contentinfo [ref=e18]:
+    - text: Aligo
+    - generic [ref=e19]: 高校差旅工作台

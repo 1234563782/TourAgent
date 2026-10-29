@@ -50,7 +50,7 @@ class CLITests(unittest.TestCase):
         self.assertEqual(report["memory_backend"], "postgres")
         self.assertFalse(report["identity_authentication_implemented"])
         self.assertEqual(set(report["missing_memory_variables"]),
-                         {"TRAVEL_MEMORY_DATABASE_URL", "TRAVEL_MEMORY_COMPANY_ID"})
+                         {"TRAVEL_MEMORY_DATABASE_URL"})
 
     def test_invalid_user_is_rejected(self):
         result = self.run_cli("--user", "../outside", "--check-config")

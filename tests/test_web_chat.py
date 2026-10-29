@@ -27,7 +27,7 @@ class ChatTests(unittest.TestCase):
     def setUp(self):
         self.auth = Mock()
         self.auth.current_user.return_value = {
-            "company_id": "company", "user_id": "verified", "username": "alice"}
+            "user_id": "verified", "username": "alice"}
         self.graph = Mock()
         self.graph.stream.return_value = iter(())
         self.graph.get_state.return_value = state()
@@ -84,7 +84,7 @@ class ChatTests(unittest.TestCase):
         self.assertEqual(response.json()["messages"][-1]["text"], "response")
         action, config = self.graph.stream.call_args.args
         self.assertEqual(action["messages"][0].content, "hello")
-        self.assertEqual(config["configurable"]["thread_id"], "company:verified:web")
+        self.assertEqual(config["configurable"]["thread_id"], "verified:web")
         self.assertEqual(self.mocks[1].call_args.args[1].user_id, "verified")
 
     def test_full_length_chinese_message(self):
@@ -159,7 +159,7 @@ class ChatTests(unittest.TestCase):
         self.assertNotIn("hidden", response.text)
         self.graph.invoke.assert_not_called()
         self.assertEqual(self.graph.stream.call_args.args[1]["configurable"]["thread_id"],
-                         "company:verified:web")
+                         "verified:web")
 
     def test_stream_rejects_stale_confirmation_before_execution(self):
         self.graph.get_state.return_value = state(pending=[{"action": "save_trip"}])
@@ -176,12 +176,12 @@ class LockTests(unittest.TestCase):
         with patch("business_travel.web.memory_connection", return_value=nullcontext(connection)):
             connection.execute.return_value.fetchone.return_value = {"acquired": True}
             with self.assertRaises(RuntimeError):
-                with conversation_lock(settings(), MemoryIdentity("company", "alice")):
+                with conversation_lock(settings(), MemoryIdentity("alice")):
                     raise RuntimeError("test")
             self.assertIn("pg_advisory_unlock", connection.execute.call_args.args[0])
             connection.execute.return_value.fetchone.return_value = {"acquired": False}
             from fastapi import HTTPException
             with self.assertRaises(HTTPException) as error:
-                with conversation_lock(settings(), MemoryIdentity("company", "alice")):
+                with conversation_lock(settings(), MemoryIdentity("alice")):
                     self.fail("Contended execution must not run")
             self.assertEqual(error.exception.status_code, 409)

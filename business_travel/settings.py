@@ -82,7 +82,6 @@ class Settings:
     tuniu_hotel_detail_budget: float = 25
     policy_backend: str = "local"
     policy_database_url: str = field(default="", repr=False)
-    policy_company_id: str = ""
     policy_key: str = "travel"
     embedding_base_url: str = ""
     embedding_api_key: str = field(default="", repr=False)
@@ -109,22 +108,31 @@ class Settings:
     policy_citation_mode: str = "fragments"
     policy_check_mode: str = "estimate"
     reimbursement_max_nights: int = 366
+    invoice_buyer_name: str = ""
+    invoice_buyer_tax_id: str = ""
+    invoice_max_file_bytes: int = 1048576
+    invoice_max_batch_files: int = 10
+    attachment_max_file_bytes: int = 1048576
+    attachment_max_files: int = 10
     policy_dictionary_path: Path | None = None
     memory_database_url: str = field(default="", repr=False)
-    memory_company_id: str = ""
     memory_schema: str = "travel_memory"
     memory_connect_timeout: int = 10
     memory_history_limit: int = 10
     resource_user_concurrency: int = 1
     resource_global_concurrency: int = 8
     resource_queue_size: int = 8
-    resource_queue_timeout: float = 2.0
-    resource_poll_seconds: float = 0.05
+    resource_queue_timeout: float = 10.0
+    resource_poll_seconds: float = 0.1
     resource_user_daily_requests: int = 100
-    resource_company_daily_requests: int = 1000
+    resource_school_daily_requests: int = 1000
     resource_user_daily_calls: int = 2000
-    resource_company_daily_calls: int = 20000
-    resource_request_calls: int = 24
+    resource_school_daily_calls: int = 20000
+    # Ceiling for one request; quota is prepaid in tranches of resource_call_tranche.
+    resource_request_calls: int = 40
+    resource_call_tranche: int = 8
+    # Wall clock for one admitted run: a slow provider must not pin a slot forever.
+    resource_request_deadline: float = 180.0
     db_pool_size: int = 12
     db_session_pool_size: int = 36
     db_pool_waiting: int = 16
@@ -193,6 +201,12 @@ class Settings:
             policy_citation_mode=getenv("TRAVEL_POLICY_CITATION_MODE", "fragments").strip().lower(),
             policy_check_mode=getenv("TRAVEL_POLICY_CHECK_MODE", "estimate").strip().lower(),
             reimbursement_max_nights=int(getenv("TRAVEL_REIMBURSEMENT_MAX_NIGHTS", "366")),
+            invoice_buyer_name=getenv("TRAVEL_INVOICE_BUYER_NAME", "").strip(),
+            invoice_buyer_tax_id=getenv("TRAVEL_INVOICE_BUYER_TAX_ID", "").strip(),
+            invoice_max_file_bytes=int(getenv("TRAVEL_INVOICE_MAX_FILE_BYTES", "1048576")),
+            invoice_max_batch_files=int(getenv("TRAVEL_INVOICE_MAX_BATCH_FILES", "10")),
+            attachment_max_file_bytes=int(getenv("TRAVEL_ATTACHMENT_MAX_FILE_BYTES", "1048576")),
+            attachment_max_files=int(getenv("TRAVEL_ATTACHMENT_MAX_FILES", "10")),
             context_window_tokens=int(getenv("TRAVEL_CONTEXT_WINDOW_TOKENS", "65536")),
             context_output_tokens=int(getenv("TRAVEL_CONTEXT_OUTPUT_TOKENS", "8192")),
             context_margin_tokens=int(getenv("TRAVEL_CONTEXT_MARGIN_TOKENS", "4096")),
@@ -224,7 +238,6 @@ class Settings:
             tuniu_hotel_detail_budget=float(getenv("TUNIU_HOTEL_DETAIL_BUDGET", "25")),
             policy_backend=getenv("TRAVEL_POLICY_BACKEND", "local").strip(),
             policy_database_url=getenv("TRAVEL_POLICY_DATABASE_URL", "").strip(),
-            policy_company_id=getenv("TRAVEL_POLICY_COMPANY_ID", "").strip(),
             policy_key=getenv("TRAVEL_POLICY_KEY", "travel").strip(),
             embedding_base_url=getenv("TRAVEL_EMBEDDING_BASE_URL", "").strip(),
             embedding_api_key=getenv("TRAVEL_EMBEDDING_API_KEY", "").strip(),
@@ -252,8 +265,6 @@ class Settings:
             policy_dictionary_path=optional("TRAVEL_POLICY_DICTIONARY_PATH"),
             memory_database_url=(getenv("TRAVEL_MEMORY_DATABASE_URL", "").strip()
                                  or getenv("TRAVEL_POLICY_DATABASE_URL", "").strip()),
-            memory_company_id=(getenv("TRAVEL_MEMORY_COMPANY_ID", "").strip()
-                               or getenv("TRAVEL_POLICY_COMPANY_ID", "").strip()),
             memory_schema=getenv("TRAVEL_MEMORY_SCHEMA") or "travel_memory",
             memory_connect_timeout=int(getenv("TRAVEL_MEMORY_CONNECT_TIMEOUT") or "10"),
             memory_history_limit=int(getenv("TRAVEL_MEMORY_HISTORY_LIMIT") or "10"),
@@ -279,6 +290,7 @@ class Settings:
             raise ValueError("Timeout, step limit and candidate limit must be positive")
         settings.validate_context()
         settings.validate_resources()
+        settings.validate_invoices()
         if not 1 <= settings.policy_max_checks <= settings.max_steps:
             raise ValueError("TRAVEL_POLICY_MAX_CHECKS must be within the graph step limit")
         if not 1 <= settings.slot_max_attempts <= 5 or not 1 <= settings.planner_max_attempts <= 5:
@@ -319,11 +331,6 @@ class Settings:
         if (not re.fullmatch(r"[a-z][a-z0-9_]{0,62}", settings.memory_schema)
                 or settings.memory_schema == "public" or settings.memory_schema.startswith("pg_")):
             raise ValueError("TRAVEL_MEMORY_SCHEMA must be a dedicated lowercase SQL identifier")
-        if settings.memory_company_id and not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", settings.memory_company_id):
-            raise ValueError("TRAVEL_MEMORY_COMPANY_ID must contain 1-64 ASCII ID characters")
-        if (settings.memory_company_id and settings.policy_company_id
-                and settings.memory_company_id != settings.policy_company_id):
-            raise ValueError("Memory and policy company IDs must match for this deployment")
         if not 1 <= settings.memory_connect_timeout <= 120 or not 1 <= settings.memory_history_limit <= 100:
             raise ValueError("Invalid memory connection timeout or history limit")
         if not 1 <= settings.embedding_batch_size <= 64:
@@ -349,6 +356,29 @@ class Settings:
             raise ValueError("Invalid policy evidence budget or retrieval attempts")
         return settings
 
+    def validate_invoices(self):
+        if not 1024 <= self.invoice_max_file_bytes <= 5 * 1024 * 1024:
+            raise ValueError("TRAVEL_INVOICE_MAX_FILE_BYTES must be between 1024 and 5242880")
+        if not 1 <= self.invoice_max_batch_files <= 20:
+            raise ValueError("TRAVEL_INVOICE_MAX_BATCH_FILES must be between 1 and 20")
+        if len(self.invoice_buyer_name) > 200 or len(self.invoice_buyer_tax_id) > 40:
+            raise ValueError("Invoice buyer configuration is too long")
+        if not 1024 <= self.attachment_max_file_bytes <= 5 * 1024 * 1024:
+            raise ValueError("TRAVEL_ATTACHMENT_MAX_FILE_BYTES must be between 1024 and 5242880")
+        if not 1 <= self.attachment_max_files <= 20:
+            raise ValueError("TRAVEL_ATTACHMENT_MAX_FILES must be between 1 and 20")
+
+    @property
+    def attachment_request_bytes(self):
+        # /api/attachments/inspect accepts one file per request; the count
+        # limit applies to a chat message, not to the upload body.
+        return 4 * ((self.attachment_max_file_bytes + 2) // 3) + 4096
+
+    @property
+    def invoice_request_bytes(self):
+        # Base64 expansion plus bounded file/expense metadata. Other endpoints keep their limits.
+        return self.invoice_max_batch_files * (4 * ((self.invoice_max_file_bytes + 2) // 3) + 65536)
+
     @classmethod
     def resource_defaults(cls):
         names = [name for name in cls.__dataclass_fields__
@@ -370,8 +400,16 @@ class Settings:
         if self.resource_poll_seconds > self.resource_queue_timeout:
             raise ValueError("Resource polling interval exceeds queue timeout")
         if self.resource_request_calls > min(self.resource_user_daily_calls,
-                                             self.resource_company_daily_calls):
+                                             self.resource_school_daily_calls):
             raise ValueError("Daily call quota must cover one request reservation")
+        if self.resource_request_calls < self.max_steps + 8:
+            # A full-length graph plus review/repair calls must fit in one request.
+            raise ValueError("Single-request call ceiling must cover max steps and review calls")
+        if self.resource_call_tranche > self.resource_request_calls:
+            raise ValueError("Call tranche cannot exceed the single-request call ceiling")
+        if self.resource_global_concurrency + self.resource_queue_size > 16:
+            # Every admitted or queued request pins one synchronous worker thread.
+            raise ValueError("Concurrency and queue must fit the synchronous worker budget")
         if self.db_session_pool_size < 2 * (self.resource_global_concurrency + self.resource_queue_size) + 2:
             raise ValueError("Session pool must cover executors, queue and read headroom")
 
@@ -396,13 +434,11 @@ class Settings:
     def missing_memory_config(self) -> list[str]:
         return [name for name, value in (
             ("TRAVEL_MEMORY_DATABASE_URL", self.memory_database_url),
-            ("TRAVEL_MEMORY_COMPANY_ID", self.memory_company_id),
         ) if not value]
 
     def missing_policy_config(self, *, embedding=True) -> list[str]:
         values = [
             ("TRAVEL_POLICY_DATABASE_URL", self.policy_database_url),
-            ("TRAVEL_POLICY_COMPANY_ID", self.policy_company_id),
             ("TRAVEL_POLICY_KEY", self.policy_key),
         ]
         if embedding:

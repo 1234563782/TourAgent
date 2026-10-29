@@ -1,0 +1,195 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - link "Aligo 首页" [ref=e3] [cursor=pointer]:
+      - /url: /
+      - generic [ref=e4]: Aligo 高校差旅
+    - generic [ref=e5]: 个人工作台
+  - main [ref=e6]:
+    - region [ref=e20]:
+      - generic [ref=e21]:
+        - generic [ref=e22]:
+          - paragraph [ref=e23]: MY WORKSPACE
+          - heading "我的差旅" [level=1] [ref=e24]
+        - generic [ref=e25]:
+          - generic [ref=e26]: admin
+          - button "退出登录" [ref=e27] [cursor=pointer]
+      - generic [ref=e28]:
+        - generic [ref=e29]:
+          - term [ref=e30]: 组织
+          - definition [ref=e31]: agent-demo
+        - generic [ref=e32]:
+          - term [ref=e33]: 用户 ID
+          - definition [ref=e34]: 2b0107d755c24b8abdf6157e9c07896b
+      - region [ref=e35]:
+        - generic [ref=e36]:
+          - heading "差旅助手" [level=2] [ref=e37]
+          - button "刷新会话" [disabled] [ref=e38]
+        - generic [ref=e39]:
+          - complementary "历史对话" [ref=e40]:
+            - button "新对话" [disabled] [ref=e41]
+            - navigation "选择对话" [ref=e42]:
+              - button [disabled] [ref=e257]:
+                - text: 新对话
+                - time [ref=e258]: 10/24 00:05
+              - button [disabled] [ref=e259]:
+                - text: 查看我刚才保存的行程
+                - time [ref=e260]: 10/24 00:03
+              - button [disabled] [ref=e261]:
+                - text: nihao
+                - time [ref=e262]: 10/23 20:39
+              - button [disabled] [ref=e263]:
+                - text: 你是谁
+                - time [ref=e264]: 10/20 09:21
+              - button [disabled] [ref=e265]:
+                - text: 你好
+                - time [ref=e266]: 10/20 09:20
+              - button [disabled] [ref=e267]:
+                - text: 你好
+                - time [ref=e268]: 10/20 09:18
+              - button [disabled] [ref=e269]:
+                - text: 你好
+                - time [ref=e270]: 10/20 00:23
+              - button [disabled] [ref=e271]:
+                - text: 帮我查长沙到郑州的机票，另外解释一下学校的住宿报销标准。
+                - time [ref=e272]: 10/19 09:28
+              - button [disabled] [ref=e273]:
+                - text: 帮我查长沙到郑州的机票，另外解释一下学校的住宿报销标准。
+                - time [ref=e274]: 10/19 09:22
+              - button [disabled] [ref=e275]:
+                - text: 帮我查长沙到郑州的机票，另外解释一下学校的住宿报销标准。
+                - time [ref=e276]: 10/18 23:29
+              - button [disabled] [ref=e277]:
+                - text: 帮我查长沙到郑州的机票，另外解释一下学校的住宿报销标准。
+                - time [ref=e278]: 10/18 22:39
+              - button [disabled] [ref=e279]:
+                - text: 我是院士，去上海出差，我的住宿标准是多少
+                - time [ref=e280]: 10/18 22:02
+              - button [disabled] [ref=e281]:
+                - text: 我是院士，我的住宿标准是多少的
+                - time [ref=e282]: 10/18 21:53
+              - button [disabled] [ref=e283]:
+                - text: 我是院士，我的住宿标准是多少
+                - time [ref=e284]: 10/18 21:46
+              - button [disabled] [ref=e285]:
+                - text: 我是院士，我的住宿标准是多少
+                - time [ref=e286]: 10/18 21:10
+              - button [disabled] [ref=e287]:
+                - text: 我是院士，我的住宿标准是多少
+                - time [ref=e288]: 10/18 21:02
+              - button [disabled] [ref=e289]:
+                - text: 我是院士，我的住宿标准是多少
+                - time [ref=e290]: 10/18 20:07
+              - button [disabled] [ref=e291]:
+                - text: 你好
+                - time [ref=e292]: 10/18 20:06
+              - button [disabled] [ref=e293]:
+                - text: 我是院士，我的住宿标准是多少
+                - time [ref=e294]: 10/18 19:50
+              - button [disabled] [ref=e295]:
+                - text: 新对话
+                - time [ref=e296]: 10/18 19:38
+              - button [disabled] [ref=e297]:
+                - text: 我是院士，帮我查一下我的住宿标准是多少
+                - time [ref=e298]: 10/18 17:57
+              - button [disabled] [ref=e299]:
+                - text: 我是院士，帮我查一下我的住宿标准是多少
+                - time [ref=e300]: 10/18 16:39
+              - button [disabled] [ref=e301]:
+                - text: 我是院士，帮我查一下我的住宿标准是多少
+                - time [ref=e302]: 10/18 16:12
+              - button [disabled] [ref=e303]:
+                - text: 我是院士去北京出差，帮我查一下住宿标准是多少
+                - time [ref=e304]: 10/18 15:58
+              - button [disabled] [ref=e305]:
+                - text: 我是院士，我准备出差，从南京到北京，明天出发，后天回来，住宿也是明天入住，后天退房，帮我查一下酒店和交通，按照我的标准
+                - time [ref=e306]: 10/18 15:51
+              - button [disabled] [ref=e307]:
+                - text: 我是院士，我准备出差，从南京到北京，明天出发，后天回来，住宿也是明天入住，后天退房，帮我查一下酒店和交通，按照我的标准
+                - time [ref=e308]: 10/18 14:51
+              - button [disabled] [ref=e309]:
+                - text: 我是院士，我准备出差，从南京到北京，明天出发，后天回来，住宿也是明天入住，后天退房，帮我查一下酒店和交通，按照我的标准
+                - time [ref=e310]: 10/18 14:25
+              - button [disabled] [ref=e311]:
+                - text: 我是院士，我准备出差，从南京到北京，明天出发，后天回来，住宿也是明天入住，后天退房，帮我查一下酒店和交通，按照我的标准
+                - time [ref=e312]: 10/18 14:09
+              - button [disabled] [ref=e313]:
+                - text: 我是院士，我准备出差，从南京到北京，明天出发，后天回来，住宿也是明天入住，后天退房，帮我查一下酒店和交通，按照我的标准
+                - time [ref=e314]: 10/18 13:41
+              - button [disabled] [ref=e315]:
+                - text: 新对话
+                - time [ref=e316]: 10/18 13:40
+              - button [disabled] [ref=e317]:
+                - text: 我是院士，我准备出差，从南京到北京，明天出发，后天回来，住宿也是明天入住，后天退房，帮我查一下酒店和交通，按照我的标准
+                - time [ref=e318]: 10/18 13:26
+              - button [disabled] [ref=e319]:
+                - text: 我是院士，我准备出差，从南京到北京，明天出发，后天回来，住宿也是明天入住，后天退房，帮我查一下酒店和交通，按照我的标准
+                - time [ref=e320]: 10/17 00:44
+              - button [disabled] [ref=e321]:
+                - text: 我是院士，我准备出差，从南京到北京，明天出发，后天回来，住宿也是明天入住，后天退房，帮我查一下酒店和交通，按照我的标准
+                - time [ref=e322]: 10/16 23:12
+              - button [disabled] [ref=e323]:
+                - text: 我是院士，我准备出差，从南京到北京，明天出发，后天回来，住宿也是明天入住，后天退房，帮我查一下酒店和交通，按照我的标准
+                - time [ref=e324]: 10/16 21:59
+              - button [disabled] [ref=e325]:
+                - text: 我是院士，我准备出差，从南京到北京，明天出发，后天回来，住宿也是明天入住，后天退房，帮我查一下酒店和交通，按照我的标准
+                - time [ref=e326]: 10/16 10:28
+              - button [disabled] [ref=e327]:
+                - text: 我准备出差，从南京到北京，明天出发，后天回来，住宿也是明天入住，后天退房，帮我查一下酒店和交通
+                - time [ref=e328]: 10/16 10:26
+              - button [disabled] [ref=e329]:
+                - text: 我准备出差，从南京到北京，明天出发，后天回来，住宿也是明天入住，后天退房，帮我查一下酒店和交通
+                - time [ref=e330]: 10/16 09:59
+              - button [disabled] [ref=e331]:
+                - text: 我准备出差，从南京到北京，明天出发，后天回来，住宿也是明天入住，后天退房，帮我查一下酒店和交通
+                - time [ref=e332]: 10/13 19:24
+              - button [disabled] [ref=e333]:
+                - text: 我准备出差，从南京到北京，明天出发，后天回来，住宿也是明天入住，后天退房，帮我查一下酒店和交通
+                - time [ref=e334]: 10/11 00:09
+              - button [disabled] [ref=e335]:
+                - text: 你好
+                - time [ref=e336]: 10/11 00:07
+              - button [disabled] [ref=e337]:
+                - text: 你好
+                - time [ref=e338]: 10/10 23:44
+              - button [disabled] [ref=e339]:
+                - text: 你好
+                - time [ref=e340]: 10/10 23:42
+              - button [disabled] [ref=e341]:
+                - text: 你好
+                - time [ref=e342]: 10/10 23:25
+              - button [disabled] [ref=e343]:
+                - text: 你好
+                - time [ref=e344]: 10/10 23:09
+              - button [disabled] [ref=e345]:
+                - text: 你好
+                - time [ref=e346]: 10/10 16:30
+              - button [disabled] [ref=e347]:
+                - text: 你好
+                - time [ref=e348]: 10/10 16:28
+              - button [disabled] [ref=e349]:
+                - text: 我准备出差，从南京到北京，明天出发，后天回来，住宿也是明天入住，后天退房，帮我查一下酒店和交通
+                - time [ref=e350]: 10/10 14:59
+              - button [disabled] [ref=e351]:
+                - text: 你好
+                - time [ref=e352]: 10/10 14:58
+              - button [disabled] [ref=e353]:
+                - text: 我准备出差，从南京到北京，明天出发，后天回来，住宿也是明天入住，后天退房，帮我查一下酒店和交通
+                - time [ref=e354]: 10/09 21:11
+              - button [disabled] [ref=e355]:
+                - text: 帮我规划一下南京到杭州的出差计划，今天出发，后天离开
+                - time [ref=e356]: 10/09 21:06
+            - button "更多对话" [disabled] [ref=e143]
+          - generic [ref=e144]:
+            - heading "新对话" [level=3] [ref=e254]
+            - generic [ref=e146]:
+              - generic [ref=e357]: 普通人员坐高铁有哪些席别可以选择
+              - generic "尚未确认完成的回答" [ref=e358]
+            - status [ref=e150]: 正在理解本次需求
+            - generic [ref=e151]:
+              - textbox "消息" [disabled] [ref=e152]:
+                - /placeholder: 输入消息
+                - text: 普通人员坐高铁有哪些席别可以选择
+              - button "发送" [disabled] [ref=e153]
+  - contentinfo [ref=e18]:
+    - text: Aligo
+    - generic [ref=e19]: 高校差旅工作台

@@ -20,7 +20,6 @@ def parser():
     prepare = sub.add_parser("prepare", help="Word 解析成待核对 JSON，不连接服务")
     prepare.add_argument("--source", type=Path, required=True)
     prepare.add_argument("--output", type=Path, required=True)
-    prepare.add_argument("--company", required=True)
     prepare.add_argument("--policy-key", default="travel")
     prepare.add_argument("--version", required=True)
     prepare.add_argument("--effective-from", type=date.fromisoformat, required=True)
@@ -29,7 +28,6 @@ def parser():
     prepare.add_argument("--chunk-size", type=int, default=1400)
     package = sub.add_parser("prepare-package", help="离线组装正文和附表，不连接服务")
     package.add_argument("--manifest", type=Path, required=True)
-    package.add_argument("--company", required=True)
     package.add_argument("--output", type=Path, required=True)
     sub.add_parser("check-config", help="仅显示缺失配置键名，不联网")
     sub.add_parser("init-db", help="显式创建 vector 扩展、政策表及 HNSW 索引，需要数据库 DDL 权限")
@@ -52,7 +50,7 @@ def main(argv=None):
     try:
         if args.command == "prepare-package":
             from business_travel.policy_package import prepare_package
-            bundle = prepare_package(args.manifest, company_id=args.company)
+            bundle = prepare_package(args.manifest)
             args.output.parent.mkdir(parents=True, exist_ok=True)
             with args.output.open("x", encoding="utf-8") as stream:
                 stream.write(bundle.model_dump_json(indent=2))
@@ -62,7 +60,7 @@ def main(argv=None):
         elif args.command == "prepare":
             if args.output.exists() or args.output.resolve() == args.source.resolve():
                 raise ValueError("输出文件已存在；请选择新的导入包路径，避免覆盖。")
-            bundle = parse_docx(args.source, company_id=args.company, policy_key=args.policy_key,
+            bundle = parse_docx(args.source, policy_key=args.policy_key,
                                 version=args.version, effective_from=args.effective_from,
                                 effective_to=args.effective_to, chunk_size=args.chunk_size)
             if args.rules:

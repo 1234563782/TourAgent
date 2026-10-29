@@ -17,7 +17,7 @@ class CurrentPolicyStoreTests(unittest.TestCase):
         result = store.search("交通标准")
         self.assertEqual(result["status"], "ok")
         query = next(call for call in conn.execute.call_args_list if "FROM policy_documents d" in call.args[0])
-        self.assertEqual(query.args[1], ("test_co", "travel"))
+        self.assertEqual(query.args[1], ("travel",))
         self.assertIn("d.status='published'", query.args[0])
         self.assertIn("published_at DESC", query.args[0])
         self.assertIn("LIMIT 1", query.args[0])

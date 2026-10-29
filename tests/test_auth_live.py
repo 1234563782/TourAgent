@@ -81,15 +81,15 @@ class AuthLiveTests(unittest.TestCase):
         self.store.manage_user(self.name, active=True)
         self.assertIsNotNone(self.store.login(self.name, replacement, self.client_id))
 
-    def test_company_scope_and_duplicate_username(self):
+    def test_single_school_store_shares_sessions_and_rejects_duplicate_username(self):
         token = self.login()
-        other = AuthStore(replace(self.settings, memory_company_id="another_company"), self.config)
-        self.assertIsNone(other.current_user(token))
-        self.assertIsNone(other.login(self.name, self.password, self.client_id))
-        other_identity = other.create_user(self.name, self.password)
-        self.assertNotEqual(other_identity.user_id, self.identity.user_id)
+        other = AuthStore(replace(self.settings), self.config)
+        self.assertEqual(other.current_user(token)["user_id"], self.identity.user_id)
+        self.assertIsNotNone(other.login(self.name, self.password, self.client_id))
+        with self.assertRaises(errors.UniqueViolation):
+            other.create_user(self.name, self.password)
         other.logout(token)
-        self.assertIsNotNone(self.store.current_user(token))
+        self.assertIsNone(self.store.current_user(token))
         with self.assertRaises(errors.UniqueViolation):
             self.store.create_user(self.name.upper(), self.password)
 

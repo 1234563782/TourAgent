@@ -3,7 +3,6 @@ CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE IF NOT EXISTS policy_documents (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    company_id text NOT NULL,
     policy_key text NOT NULL,
     version text NOT NULL,
     effective_from date NOT NULL,
@@ -19,11 +18,11 @@ CREATE TABLE IF NOT EXISTS policy_documents (
     warnings jsonb NOT NULL DEFAULT '[]',
     created_at timestamptz NOT NULL DEFAULT now(),
     published_at timestamptz,
-    UNIQUE (company_id, policy_key, version),
+    UNIQUE (policy_key, version),
     CHECK (effective_to IS NULL OR effective_to >= effective_from)
 );
 CREATE INDEX IF NOT EXISTS policy_documents_scope_idx
-    ON policy_documents (company_id, policy_key, status, effective_from);
+    ON policy_documents (policy_key, status, effective_from);
 
 CREATE TABLE IF NOT EXISTS policy_chunks (
     document_id bigint NOT NULL REFERENCES policy_documents(id),

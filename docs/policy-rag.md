@@ -24,7 +24,7 @@
 
 ```text
 结构化意图与已审阅槽位
-  -> 锁定组织、政策键与当前发布版本
+  -> 锁定学校政策键与当前发布版本
   -> 精确向量 + 关键词召回 -> RRF
   -> 完整段落/条款、适用范围与关联条款补全
   -> 来源元数据、版本一致性、上下文完整性和字符预算检查
@@ -33,7 +33,7 @@
   -> PolicyAnswerReview 独立调用复核
      -> 充分：逐结论输出 [S1] 等标记及文件/版本/条款/片段来源
      -> 缺用户信息：返回经复核的追问，任务标记为待补充
-     -> 检索不足：经复核的查询改写，在同组织同政策版本内再次检索
+     -> 检索不足：经复核的查询改写，在同学校政策版本内再次检索
      -> 冲突、依据不完整、协议错误或服务异常：不输出未经核验的结论
 ```
 
@@ -129,7 +129,6 @@ RRF 仍只是排名融合，不是模型精排。独立重排的供应商协议�
 | --- | --- |
 | `TRAVEL_POLICY_BACKEND` | `pgvector` |
 | `TRAVEL_POLICY_DATABASE_URL` | PostgreSQL 连接串，格式 `postgresql://用户名:密码@主机:端口/数据库` |
-| `TRAVEL_POLICY_COMPANY_ID` | 模拟导入包使用 `agent-demo`，实际公司需另建对应导入包 |
 | `TRAVEL_POLICY_KEY` | `travel` |
 | `TRAVEL_EMBEDDING_BASE_URL` | 支持 `/embeddings` 的 HTTPS 基础地址，通常以 `/v1` 结尾 |
 | `TRAVEL_EMBEDDING_API_KEY` | 对应 Embedding 服务密钥 |
@@ -160,12 +159,12 @@ RRF 仍只是排名融合，不是模型精排。独立重排的供应商协议�
 
 用户提供的修订版是模拟制度，不自动作为真实企业制度发布。
 本轮生成的导入包位于 `artifacts/policy/demo-v1.1.bundle.json`。
-其公司标识为 `agent-demo`，版本 `V1.1`，测试生效日为 `2026-09-07`，无固定截止日。
+这是历史模拟材料；当前导入包不含组织字段。版本 `V1.1`，测试生效日为 `2026-09-07`，无固定截止日。
 
 重新生成时选择不存在的新输出文件，命令默认拒绝覆盖：
 
 ```powershell
-.\.venv\Scripts\python.exe scripts/policy_admin.py prepare --source "artifacts/agent有限公司差旅费报销管理制度_模拟修订版_V1.1.docx" --output artifacts/policy/demo-v1.1-new.bundle.json --company agent-demo --version V1.1 --effective-from 2026-09-07 --rules policies/demo-v1.1.rules.json
+.\.venv\Scripts\python.exe scripts/policy_admin.py prepare --source "artifacts/agent有限公司差旅费报销管理制度_模拟修订版_V1.1.docx" --output artifacts/policy/demo-v1.1-new.bundle.json --version V1.1 --effective-from 2026-09-07 --rules policies/demo-v1.1.rules.json
 ```
 
 `prepare` 不读取 `.env`，不访问数据库或模型；只读 Word，写入独立 JSON。
@@ -174,7 +173,7 @@ RRF 仍只是排名融合，不是模型精排。独立重排的供应商协议�
 
 核对项：
 
-- 导入包公司、版本、适用日期和来源文件是否正确。
+- 导入包政策键、版本、适用日期和来源文件是否正确。
 - 表头、城市等级、职级、金额、税费和单位是否与原文一致。
 - 住宿合住倍率、包餐扣减、驻场阈值和来源条款是否正确。
 - `warnings` 是否有合并单元格或图片提示；不要忽略未经确认的解析警告。
@@ -200,7 +199,7 @@ RRF 仍只是排名融合，不是模型精排。独立重排的供应商协议�
 .\.venv\Scripts\python.exe scripts/policy_admin.py publish --document-id <返回的编号> --reviewed-sha256 <核对后的哈希>
 ```
 
-同公司、同政策键、同版本且内容、模型空间和分词版本相同，重复导入返回 `unchanged`，
+同政策键、同版本且内容、模型空间和分词版本相同，重复导入返回 `unchanged`，
 不再次请求 Embedding。已有版本内容不一致时拒绝覆盖，须使用新版本号。
 导入中任何写入失败，事务回滚；Embedding 失败不写入半成品文档。
 
@@ -212,7 +211,7 @@ RRF 仍只是排名融合，不是模型精排。独立重排的供应商协议�
 
 ## 检索方式
 
-每次请求先根据部署绑定的组织、政策键、已发布状态选择最近发布文档，
+每次请求先根据部署绑定的政策键、已发布状态选择最近发布文档，
 按 `published_at DESC NULLS LAST, id DESC` 确定当前版本，草稿不可见。
 一般咨询不需要日期；实际费用/入住日期只用于季节标准等业务条件，不选政策版本。
 用户提到政策年份不能填成费用日期，缺失实际日期不能默认今天。
@@ -376,7 +375,9 @@ $env:PYTHONPATH='.;tests'
 审计表只保存政策版本关联、费用类别/日期、结果状态、原因和条款，不保存员工姓名、
 问题原文或凭证。图的既有 SQLite 对话存储仍会保留对话，应按敏感数据保护。
 
-公司范围从可信部署配置绑定，不开放给模型工具参数。当前 CLI 无企业登录、
+本部署仅服务一所学校，不配置组织 ID，政策键不开放给模型工具参数。当前 CLI 无企业登录、
 用户级 ACL 或 PostgreSQL RLS，不应直接部署成共享多租户服务。
 生产应由管理员配置独立迁移账号、只读检索/规则读取及审计写入权限、
 行级权限、备份和数据保留策略；当前没有自动数据清理服务。
+
+旧导入包须先转换并迁移摘要，见 [单学校迁移说明](single-school-migration.md)。

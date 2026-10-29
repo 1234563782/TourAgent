@@ -169,8 +169,7 @@ class PostgresPolicyStore:
         s = self.settings
         if s.missing_policy_config(embedding=False):
             raise PolicyError("policy_database_configuration_required")
-        if (not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", s.policy_company_id)
-                or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", s.policy_key)):
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", s.policy_key):
             raise PolicyError("invalid_policy_scope")
         try:
             from .db_pool import pooled_connection
@@ -253,7 +252,7 @@ class PostgresPolicyStore:
     def stage(self, bundle: PolicyBundle):
         bundle = PolicyBundle.model_validate(bundle.model_dump(mode="json"))
         s = self.settings
-        if (bundle.company_id, bundle.policy_key) != (s.policy_company_id, s.policy_key):
+        if bundle.policy_key != s.policy_key:
             raise PolicyError("bundle_scope_mismatch")
         if bundle.rules:
             reviewed = load_reviewed_rules(bundle.rules)
@@ -265,9 +264,8 @@ class PostgresPolicyStore:
         digest = bundle.digest()
         with self.connection() as conn:
             existing = conn.execute(
-                "SELECT id, bundle_sha256, embedding_space, tokenizer FROM policy_documents "
-                "WHERE company_id=%s AND policy_key=%s AND version=%s",
-                (s.policy_company_id, s.policy_key, bundle.version)).fetchone()
+                'SELECT id, bundle_sha256, embedding_space, tokenizer FROM policy_documents WHERE policy_key=%s AND version=%s',
+                (s.policy_key, bundle.version)).fetchone()
             if existing:
                 if (existing["bundle_sha256"] != digest or existing["embedding_space"] != self.embedder.space
                         or existing["tokenizer"] != self.tokenizer.signature):
@@ -282,10 +280,8 @@ class PostgresPolicyStore:
             vectors.extend(self.embedder.embed(texts[start:start + batch_size]))
         with self.connection() as conn:
             row = conn.execute(
-                "INSERT INTO policy_documents (company_id,policy_key,version,effective_from,effective_to,"
-                "source,source_sha256,bundle_sha256,embedding_space,embedding_model,embedding_dimensions,"
-                "tokenizer,warnings) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
-                (s.policy_company_id, s.policy_key, bundle.version, bundle.effective_from, bundle.effective_to,
+                'INSERT INTO policy_documents (policy_key,version,effective_from,effective_to,source,source_sha256,bundle_sha256,embedding_space,embedding_model,embedding_dimensions,tokenizer,warnings) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id',
+                (s.policy_key, bundle.version, bundle.effective_from, bundle.effective_to,
                  bundle.source, bundle.source_sha256, digest, self.embedder.space, s.embedding_model,
                  s.embedding_dimensions, self.tokenizer.signature, Jsonb(bundle.warnings))).fetchone()
             document_id = row["id"]
@@ -325,21 +321,19 @@ class PostgresPolicyStore:
     def publish(self, document_id, reviewed_sha256, *, supersede=False):
         s = self.settings
         with self.connection() as conn:
-            # Serialize version publication for one company/policy, including concurrent CLI invocations.
+            # Serialize version publication for the school policy, including concurrent CLI invocations.
             conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
-                         (f"{s.policy_company_id}:{s.policy_key}",))
+                         (s.policy_key,))
             doc = conn.execute(
-                "SELECT * FROM policy_documents WHERE id=%s AND company_id=%s AND policy_key=%s FOR UPDATE",
-                (document_id, s.policy_company_id, s.policy_key)).fetchone()
+                'SELECT * FROM policy_documents WHERE id=%s AND policy_key=%s FOR UPDATE',
+                (document_id, s.policy_key)).fetchone()
             if not doc or doc["bundle_sha256"] != reviewed_sha256:
                 raise PolicyError("review_digest_or_document_mismatch")
             if doc["status"] == "published":
                 return {"status": "unchanged", "document_id": document_id}
             overlap = conn.execute(
-                "SELECT id,effective_from FROM policy_documents WHERE company_id=%s AND policy_key=%s "
-                "AND status='published' AND daterange(effective_from,effective_to,'[]') && "
-                "daterange(%s::date,%s::date,'[]')",
-                (s.policy_company_id, s.policy_key, doc["effective_from"], doc["effective_to"])).fetchall()
+                "SELECT id,effective_from FROM policy_documents WHERE policy_key=%s AND status='published' AND daterange(effective_from,effective_to,'[]') && daterange(%s::date,%s::date,'[]')",
+                (s.policy_key, doc["effective_from"], doc["effective_to"])).fetchall()
             for old in overlap:
                 if not supersede or old["effective_from"] >= doc["effective_from"]:
                     raise PolicyError("published_period_overlap_use_explicit_supersede_for_older_version")
@@ -352,12 +346,8 @@ class PostgresPolicyStore:
     def _active(self, conn):
         s = self.settings
         rows = conn.execute(
-            "SELECT d.*, r.rules->'source_clauses'->'scope' AS scope_clauses, "
-            "r.rules->>'profile' AS policy_profile "
-            "FROM policy_documents d LEFT JOIN policy_rules r ON r.document_id=d.id "
-            "WHERE d.company_id=%s AND d.policy_key=%s AND d.status='published' "
-            "ORDER BY d.published_at DESC NULLS LAST, d.id DESC LIMIT 1",
-            (s.policy_company_id, s.policy_key)).fetchall()
+            "SELECT d.*, r.rules->'source_clauses'->'scope' AS scope_clauses, r.rules->>'profile' AS policy_profile FROM policy_documents d LEFT JOIN policy_rules r ON r.document_id=d.id WHERE d.policy_key=%s AND d.status='published' ORDER BY d.published_at DESC NULLS LAST, d.id DESC LIMIT 1",
+            (s.policy_key,)).fetchall()
         if len(rows) > 1:
             raise PolicyError("ambiguous_policy_versions")
         return rows[0] if rows else None

@@ -27,7 +27,7 @@ from tests import test_web_chat as web_fixtures
 from tests import test_travel_graph as graph_fixtures
 
 
-IDENTITY = MemoryIdentity("synthetic-company", "synthetic-user")
+IDENTITY = MemoryIdentity("synthetic-user")
 
 
 def enabled():
@@ -145,7 +145,7 @@ class TelemetryTests(unittest.TestCase):
     def test_identity_is_keyed_scoped_and_deterministic(self):
         refs = []
         for identity, session in ((IDENTITY, "s"), (IDENTITY, "s"),
-                                  (IDENTITY, "s2"), (MemoryIdentity("other-company", "synthetic-user"), "s")):
+                                  (IDENTITY, "s2"), (MemoryIdentity("another-user"), "s")):
             with self.telemetry.request({}, identity, session, "same-request"):
                 refs.append(dict(self.records[-1].metadata))
         self.assertEqual(refs[0], refs[1])
@@ -379,7 +379,7 @@ class RealSDKTests(unittest.TestCase):
                 self.assertTrue(summarize_trace(rows, trace_id, root_id=root_id)["passed"])
                 exported = str([(s.name, dict(s.attributes), dict(s.resource.attributes), s.events) for s in spans])
                 for secret in ("SENSITIVE", "private-session", "private-request", IDENTITY.user_id,
-                               IDENTITY.company_id, service.settings.langfuse_secret_key):
+                               service.settings.langfuse_secret_key):
                     self.assertNotIn(secret, exported)
                 self.assertTrue(all(s.end_time is not None for s in spans))
             finally:

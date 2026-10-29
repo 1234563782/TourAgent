@@ -38,26 +38,22 @@ def recovery_result(row):
 
 
 def _review(connection, identity, conversation_id, graph):
-    scope = (identity.company_id, identity.user_id, conversation_id)
+    scope = (identity.user_id, conversation_id)
     run = connection.execute(
-        "SELECT * FROM chat_runs WHERE company_id=%s AND user_id=%s AND conversation_id=%s "
-        "ORDER BY created_at DESC,id DESC LIMIT 1", scope).fetchone()
+        'SELECT * FROM chat_runs WHERE user_id=%s AND conversation_id=%s ORDER BY created_at DESC,id DESC LIMIT 1', scope).fetchone()
     if not run or run["status"] not in REVIEW_STATUSES:
         raise RecoveryConflict("当前没有待核实的失败执行，请刷新会话")
     recovered = connection.execute(
-        "SELECT * FROM chat_recoveries WHERE company_id=%s AND user_id=%s "
-        "AND conversation_id=%s AND run_id=%s", (*scope, run["id"])).fetchone()
+        'SELECT * FROM chat_recoveries WHERE user_id=%s AND conversation_id=%s AND run_id=%s', (*scope, run["id"])).fetchone()
     if recovered:
         return {"run": public_run(run), "recovery": recovery_result(recovered)}, None
 
     completed = connection.execute(
-        "SELECT checkpoint_id FROM chat_runs WHERE company_id=%s AND user_id=%s "
-        "AND conversation_id=%s AND status='completed' ORDER BY created_at DESC,id DESC LIMIT 1",
+        "SELECT checkpoint_id FROM chat_runs WHERE user_id=%s AND conversation_id=%s AND status='completed' ORDER BY created_at DESC,id DESC LIMIT 1",
         scope).fetchone()
     # A fork can itself fail before its first successful turn; retain its original seed.
     inherited = connection.execute(
-        "SELECT target_checkpoint_id FROM chat_recoveries WHERE company_id=%s AND user_id=%s "
-        "AND target_conversation_id=%s", scope).fetchone()
+        'SELECT target_checkpoint_id FROM chat_recoveries WHERE user_id=%s AND target_conversation_id=%s', scope).fetchone()
     checkpoint_id = (completed["checkpoint_id"] if completed else
                      inherited["target_checkpoint_id"] if inherited else None)
     values = {}
@@ -73,8 +69,7 @@ def _review(connection, identity, conversation_id, graph):
             raise RecoveryUnavailable("完整检查点不可用，不能安全继承，请保留原会话并联系管理员")
         values = state.values
     trips = connection.execute(
-        "SELECT draft_id,data,saved_at FROM trips WHERE company_id=%s AND user_id=%s "
-        "AND saved_at >= %s ORDER BY sequence", (*scope[:2], run["created_at"])).fetchall()
+        'SELECT draft_id,data,saved_at FROM trips WHERE user_id=%s AND saved_at >= %s ORDER BY sequence', (*scope[:1], run["created_at"])).fetchall()
     review = {
         "run": public_run(run), "source_checkpoint_id": checkpoint_id,
         "saved_trips": [{"id": row["draft_id"], "data": row["data"],
@@ -94,8 +89,6 @@ def _review(connection, identity, conversation_id, graph):
 
 def recover_run(settings, identity, conversation_id, graph_factory, body=None):
     """Caller holds the source conversation lock. All fork writes commit together."""
-    if identity.company_id != settings.memory_company_id:
-        raise PermissionError("Company mismatch")
     with memory_connection(settings) as connection, connection.transaction():
         connection.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
         graph = graph_factory(ScopedPostgresSaver(connection, identity))
@@ -106,18 +99,17 @@ def recover_run(settings, identity, conversation_id, graph_factory, body=None):
             raise RecoveryConflict("待核实的运行已变化，请重新核实")
         if review["recovery"]:
             receipt = connection.execute(
-                "SELECT review_revision FROM chat_recoveries WHERE company_id=%s AND user_id=%s "
-                "AND conversation_id=%s AND run_id=%s",
-                (identity.company_id, identity.user_id, conversation_id, body.run_id)).fetchone()
+                'SELECT review_revision FROM chat_recoveries WHERE user_id=%s AND conversation_id=%s AND run_id=%s',
+                (identity.user_id, conversation_id, body.run_id)).fetchone()
             if receipt["review_revision"] != body.review_revision:
                 raise RecoveryConflict("此运行已有恢复会话，请刷新查看")
             return review["recovery"]
         if body.review_revision != review["review_revision"]:
             raise RecoveryConflict("个人记录或执行状态已变化，请重新核实后确认")
         ident = uuid4().hex
-        scope = (identity.company_id, identity.user_id)
+        scope = (identity.user_id,)
         connection.execute(
-            "INSERT INTO conversations(company_id,user_id,id,title) VALUES(%s,%s,%s,%s)",
+            'INSERT INTO conversations(user_id,id,title) VALUES(%s,%s,%s)',
             (*scope, ident, "恢复对话"))
         # Only committed durable context is inherited. Queue, draft, pending consent
         # and graph runtime internals never cross into the new execution.
@@ -131,9 +123,7 @@ def recover_run(settings, identity, conversation_id, graph_factory, body=None):
             raise RecoveryUnavailable("恢复检查点仍有待执行操作，已取消分叉")
         checkpoint_id = saved["configurable"]["checkpoint_id"]
         row = connection.execute(
-            "INSERT INTO chat_recoveries(company_id,user_id,conversation_id,run_id,"
-            "review_revision,source_checkpoint_id,target_conversation_id,target_checkpoint_id) "
-            "VALUES(%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *",
+            'INSERT INTO chat_recoveries(user_id,conversation_id,run_id,review_revision,source_checkpoint_id,target_conversation_id,target_checkpoint_id) VALUES(%s,%s,%s,%s,%s,%s,%s) RETURNING *',
             (*scope, conversation_id, body.run_id, body.review_revision,
              review["source_checkpoint_id"], ident, checkpoint_id)).fetchone()
         return recovery_result(row)

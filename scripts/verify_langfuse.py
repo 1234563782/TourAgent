@@ -54,7 +54,7 @@ def main():
         from langgraph.graph import END, START, MessagesState, StateGraph
 
         marker = "synthetic-private-" + uuid4().hex
-        identity = MemoryIdentity("synthetic-company", marker)
+        identity = MemoryIdentity(marker)
         started = datetime.now(timezone.utc) - timedelta(minutes=1)
         model = FakeListChatModel(responses=["synthetic answer" if args.capture_content else marker])
         prompt = (json.dumps({"question": "synthetic question", "password": marker})
@@ -107,7 +107,7 @@ def main():
         report["all_ended"] = bool(rows) and all(row.end_time is not None for row in rows)
         payload = json.dumps([row.model_dump(mode="json") for row in rows])
         report["no_private_payload"] = not any(value in payload for value in (
-            marker, identity.company_id, settings.langfuse_secret_key, settings.langfuse_hash_key))
+            marker, settings.langfuse_secret_key, settings.langfuse_hash_key))
         report["no_input_output"] = bool(rows) and all(
             getattr(row, field, None) in (None, "", "null", "{}", {})
             for row in rows for field in ("input", "output"))

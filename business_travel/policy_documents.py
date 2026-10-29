@@ -30,7 +30,6 @@ class PolicySource(Contract):
 
 class PolicyBundle(Contract):
     schema_version: int = 1
-    company_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
     policy_key: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
     version: str = Field(min_length=1, max_length=100)
     effective_from: date
@@ -113,7 +112,7 @@ def split_paragraph(text: str, chunk_size: int) -> list[str]:
     return parts
 
 
-def parse_docx(path: Path, *, company_id: str, policy_key: str, version: str,
+def parse_docx(path: Path, *, policy_key: str, version: str,
                effective_from: date, effective_to: date | None = None,
                chunk_size: int = 1400) -> PolicyBundle:
     """Preserve body order and table grid; never infer executable monetary rules."""
@@ -203,7 +202,7 @@ def parse_docx(path: Path, *, company_id: str, policy_key: str, version: str,
                     and sections[other.id] == sections[chunk.id])
                 or (other.clause and other.clause != chunk.clause and other.clause in explicit)
                 or (chunk.kind == "table_row" and sections[other.id] == sections[chunk.id]))]
-    return PolicyBundle(company_id=company_id, policy_key=policy_key, version=version,
+    return PolicyBundle(policy_key=policy_key, version=version,
                         effective_from=effective_from, effective_to=effective_to,
                         source=path.name, source_sha256=hashlib.sha256(raw).hexdigest(),
                         chunks=chunks, warnings=list(dict.fromkeys(warnings)))

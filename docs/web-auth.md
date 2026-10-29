@@ -7,8 +7,7 @@ FastAPI 提供同源静态页面与 JSON API。登录后可以与差旅助手聊
 不提供公开注册、找回密码、短信、邮件、SSO 或网页管理员后台。
 账号由有权操作服务器的管理员通过本机脚本创建。所有账号的 Web 权限相同。
 
-复用现有 PostgreSQL 连接和 `TRAVEL_MEMORY_SCHEMA`。公司由部署配置确定，
-用户 ID 创建时随机生成；浏览器不能自行选择公司或用户 ID。
+复用现有 PostgreSQL 连接和 `TRAVEL_MEMORY_SCHEMA`。仅服务一所学校，用户 ID 创建时随机生成；浏览器不能自行指定用户 ID。
 新账号不会自动继承旧 CLI 用户的数据，避免按用户名误绑定旧记录。
 旧数据的账号归属映射需要单独确认并迁移，本次未做。
 
@@ -34,7 +33,7 @@ FastAPI 提供同源静态页面与 JSON API。登录后可以与差旅助手聊
 
 ## 配置
 
-实际 `.env` 不需要增加新密钥。数据库和公司复用上一轮记忆配置。
+实际 `.env` 不需要增加新密钥。数据库复用会话存储配置，无需组织 ID。
 下列变量可写入项目 `.env`；进程环境变量优先，示例见 `.env.example`。
 
 | 变量 | 默认值 | 用途 |
@@ -62,7 +61,7 @@ FastAPI 提供同源静态页面与 JSON API。登录后可以与差旅助手聊
 # 启用账号，同时清除失败计数和锁定；必须重新登录
 .\.venv\Scripts\python.exe scripts/auth_admin.py enable --username yourname
 
-# 清理本部署公司已过期的会话与限流记录
+# 清理本学校已过期的会话与限流记录
 .\.venv\Scripts\python.exe scripts/auth_admin.py prune
 ```
 
@@ -76,7 +75,7 @@ FastAPI 提供同源静态页面与 JSON API。登录后可以与差旅助手聊
 | --- | --- |
 | `POST /api/auth/login` | JSON `{username, password}`，成功写入 Cookie |
 | `POST /api/auth/logout` | 撤销当前会话、清除 Cookie，重复退出也返回 204 |
-| `GET /api/auth/me` | 返回当前 `company_id`、`user_id`、`username` |
+| `GET /api/auth/me` | 返回当前 `user_id`、`username` |
 | `GET /api/memory` | 返回当前用户已保存行程草案 `trip_history`，不返回长期偏好 |
 | `GET /api/conversations?offset=0` | 本人会话列表，每页50条，返回 `items` 和 `next_offset` |
 | `POST /api/conversations` | 服务端创建空白会话，返回会话 ID 和标题 |
@@ -103,20 +102,20 @@ HTTPS 来源强制 Secure，本机 HTTP 仅允许 loopback。
 IP 限流返回 429；格式错误 422；非法来源 403；数据库不可用 503。
 错误返回不回显密码、连接串或完整输入，普通写请求内容上限为 4096 字节。
 聊天接口最多3000字符、20000字节，支持完整长度的中文消息。
-接口不接受公司/用户查询参数或请求体身份，记录归属由登录会话决定。
+接口不接受身份查询参数或请求体身份，记录归属由登录会话决定。
 
 ## 对话持久化
 
 - 新建、历史选择和刷新恢复均使用服务端生成的会话 ID；不是重新登录。
-- `TRAVEL_MEMORY_SCHEMA` 下的 `conversations` 表保存公司、用户、标题及活动时间。
+- `TRAVEL_MEMORY_SCHEMA` 下的 `conversations` 表保存用户、标题及活动时间。
   消息、槽位、草案和待确认状态仍存入 LangGraph PostgreSQL checkpoint。
-- 线程地址为 `company_id:user_id:conversation_id`；访问会话前校验归属，
+- 线程地址为 `user_id:conversation_id`；访问会话前校验归属，
   同一会话使用数据库锁防止并发执行，确认还必须匹配该会话当前检查点版本。
 - 原网页对话继续使用末尾为 `web` 的线程，在列表中显示为“原有对话”。
   不删除、搬迁或重写旧检查点。原 `/api/chat` 路径仍可访问，但写请求也必须携带 request_id，
   不保留无幂等键的旧请求格式；同步及流式入口统一使用同一执行逻辑。
-- 已保存行程仍按公司和用户共享，新建对话不会清空它们。没有长期偏好存储。
-- 当前选中 ID 存于按公司和用户区分的 `sessionStorage`，不存登录凭据。
+- 已保存行程仍按用户共享，新建对话不会清空它们。没有长期偏好存储。
+- 当前选中 ID 存于按用户区分的 `sessionStorage`，不存登录凭据。
   待收尾的请求 ID 也暂存于此，恢复终态后清除；不存问题正文。
   未发送草稿仅在本页切换时保留，刷新或退出后清空；断流后刷新已完成答案时清除已发送草稿。
 - SSE 的 `progress` 来自真实执行阶段，`delta` 只包含已完成任务的可展示回答，

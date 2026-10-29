@@ -94,11 +94,7 @@ def main():
         if not configured.langfuse_enabled or configuration_problem(configured):
             parser.error("Langfuse 未开启或配置不完整，请检查观测配置")
     # This historical acceptance checks metadata privacy, not content export.
-    settings = replace(configured, memory_schema=schema, langfuse_capture_content=False,
-                       memory_company_id=configured.memory_company_id
-                       if args.policy_rag or args.hotel_flow or args.failed_turn_flow else "test_company",
-                       policy_company_id=configured.policy_company_id
-                       if args.policy_rag or args.hotel_flow or args.failed_turn_flow else "test_company")
+    settings = replace(configured, memory_schema=schema, langfuse_capture_content=False)
     if args.resources:
         settings = replace(settings, resource_user_daily_requests=1)
     server = None
@@ -121,7 +117,7 @@ def main():
                         root_observation.raw.id if root_observation.raw else None,
                         started,
                         tuple(value for value in (
-                            identity.company_id, identity.user_id, session, request_id,
+                            identity.user_id, session, request_id,
                             configured.langfuse_secret_key, configured.langfuse_hash_key,
                         ) if value and len(value) >= 8),
                     ))

@@ -69,7 +69,7 @@ def evaluate_case(client: JevClient, case: dict, telemetry: Telemetry | None = N
             state[field] = case[field]
     started = time.perf_counter()
     trace_id = None
-    identity = SimpleNamespace(company_id="intent-evaluation", user_id="intent-evaluation")
+    identity = SimpleNamespace(user_id="intent-evaluation")
     request_id = uuid4().hex
     if telemetry is None:
         decision = client.classify(state, request_id=request_id)

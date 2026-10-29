@@ -15,18 +15,16 @@ from .db_pool import pooled_connection
 @dataclass(frozen=True)
 class MemoryIdentity:
     # HTTP callers must construct this value from the verified server-side session.
-    company_id: str
     user_id: str
 
     def __post_init__(self):
-        validate_id(self.company_id)
         validate_id(self.user_id)
 
     def thread_id(self, session_id: str) -> str:
-        return f"{self.company_id}:{self.user_id}:{validate_id(session_id)}"
+        return f"{self.user_id}:{validate_id(session_id)}"
 
     def check_thread(self, thread_id: str):
-        prefix = f"{self.company_id}:{self.user_id}:"
+        prefix = f"{self.user_id}:"
         if not isinstance(thread_id, str) or not thread_id.startswith(prefix):
             raise PermissionError("Conversation does not belong to this identity")
         validate_id(thread_id[len(prefix):])
@@ -35,7 +33,7 @@ class MemoryIdentity:
 @contextmanager
 def memory_connection(settings, *, lane="query"):
     if settings.missing_memory_config():
-        raise ValueError("Configure TRAVEL_MEMORY_DATABASE_URL and TRAVEL_MEMORY_COMPANY_ID")
+        raise ValueError("Configure TRAVEL_MEMORY_DATABASE_URL")
     schema = settings.memory_schema
     if (not re.fullmatch(r"[a-z][a-z0-9_]{0,62}", schema)
             or schema == "public" or schema.startswith("pg_")):
@@ -57,27 +55,25 @@ def setup_memory(settings):
             connection.execute("DROP TABLE IF EXISTS user_preferences")
             connection.execute("""
                 CREATE TABLE IF NOT EXISTS trips (
-                    company_id TEXT NOT NULL,
                     user_id TEXT NOT NULL,
                     draft_id TEXT NOT NULL,
                     data JSONB NOT NULL CHECK (jsonb_typeof(data) = 'object'),
                     sequence BIGINT GENERATED ALWAYS AS IDENTITY,
                     saved_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    PRIMARY KEY (company_id, user_id, draft_id)
+                    PRIMARY KEY (user_id, draft_id)
                 )
             """)
             connection.execute("""
                 CREATE INDEX IF NOT EXISTS trips_user_recent
-                ON trips (company_id, user_id, sequence DESC)
+                ON trips (user_id, sequence DESC)
             """)
             connection.execute("""
                 CREATE TABLE IF NOT EXISTS memory_imports (
-                    company_id TEXT NOT NULL,
                     user_id TEXT NOT NULL,
                     source_digest TEXT NOT NULL,
                     summary JSONB NOT NULL,
                     imported_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    PRIMARY KEY (company_id, user_id, source_digest)
+                    PRIMARY KEY (user_id, source_digest)
                 )
             """)
         # Official setup contains CREATE INDEX CONCURRENTLY and needs autocommit.
@@ -88,25 +84,24 @@ def setup_memory(settings):
     setup_chat_runs(settings)
     from .resources import setup_resources
     setup_resources(settings)
+    from .attachment_store import setup_attachments
+    setup_attachments(settings)
 
 
 class PostgresTravelMemory:
     def __init__(self, settings, identity: MemoryIdentity):
-        if identity.company_id != settings.memory_company_id:
-            raise PermissionError("Memory identity does not match the deployment company")
         self.settings = settings
         self.identity = identity
         self.user_id = identity.user_id
 
     @property
     def _scope(self):
-        return self.identity.company_id, self.identity.user_id
+        return (self.identity.user_id,)
 
     def read(self) -> dict:
         with memory_connection(self.settings) as connection, connection.transaction():
             trips = connection.execute(
-                "SELECT data FROM trips WHERE company_id=%s AND user_id=%s "
-                "ORDER BY sequence DESC LIMIT %s", (*self._scope, self.settings.memory_history_limit),
+                'SELECT data FROM trips WHERE user_id=%s ORDER BY sequence DESC LIMIT %s', (*self._scope, self.settings.memory_history_limit),
             ).fetchall()
         return {"trip_history": [row["data"] for row in trips]}
 
@@ -115,12 +110,11 @@ class PostgresTravelMemory:
             raise ValueError("A trip must have a nonempty string ID")
         with memory_connection(self.settings) as connection, connection.transaction():
             connection.execute(
-                "INSERT INTO trips(company_id,user_id,draft_id,data) VALUES(%s,%s,%s,%s) "
-                "ON CONFLICT(company_id,user_id,draft_id) DO NOTHING",
+                'INSERT INTO trips(user_id,draft_id,data) VALUES(%s,%s,%s) ON CONFLICT(user_id,draft_id) DO NOTHING',
                 (*self._scope, draft["id"], Jsonb(draft)),
             )
             saved = connection.execute(
-                "SELECT data FROM trips WHERE company_id=%s AND user_id=%s AND draft_id=%s",
+                'SELECT data FROM trips WHERE user_id=%s AND draft_id=%s',
                 (*self._scope, draft["id"]),
             ).fetchone()
             if saved["data"] != draft:
@@ -167,8 +161,12 @@ class ScopedPostgresSaver(PostgresSaver):
 
 
 @contextmanager
-def open_checkpointer(settings, identity):
-    if identity.company_id != settings.memory_company_id:
-        raise PermissionError("Checkpoint identity does not match the deployment company")
+def open_checkpointer(settings, identity, connection=None):
+    if connection is not None:
+        # Reuse the conversation-lock session when the caller already owns one.
+        # Session advisory locks and checkpoint writes then consume one pool
+        # connection instead of two for the lifetime of a chat run.
+        yield ScopedPostgresSaver(connection, identity)
+        return
     with memory_connection(settings, lane="session") as connection:
         yield ScopedPostgresSaver(connection, identity)

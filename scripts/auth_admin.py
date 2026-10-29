@@ -14,6 +14,8 @@ from business_travel.auth import AuthSettings, AuthStore, setup_auth
 from business_travel.memory_pg import setup_memory
 from business_travel.chat_runs import setup_chat_runs
 from business_travel.resources import setup_resources
+from business_travel.invoice_store import setup_invoices
+from business_travel.attachment_store import setup_attachments
 from business_travel.settings import Settings
 
 
@@ -30,7 +32,7 @@ def prompt_password():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["init", "init-runs", "init-resources", "create-user", "reset-password",
+    parser.add_argument("command", choices=["init", "init-runs", "init-resources", "init-invoices", "init-attachments", "create-user", "reset-password",
                                           "disable", "enable", "prune", "show-identity", "set-identity"])
     parser.add_argument("--username")
     parser.add_argument("--personnel-type", choices=["staff", "student", "invited"])
@@ -41,7 +43,7 @@ def main():
     parser.add_argument("--clear-transport", action="store_true")
     parser.add_argument("--clear-lodging", action="store_true")
     args = parser.parse_args()
-    if args.command not in {"init", "init-runs", "init-resources", "prune"} and not args.username:
+    if args.command not in {"init", "init-runs", "init-resources", "init-invoices", "init-attachments", "prune"} and not args.username:
         parser.error("此命令需要 --username")
     try:
         settings = Settings.from_env()
@@ -53,6 +55,10 @@ def main():
             setup_chat_runs(settings)
         elif args.command == "init-resources":
             setup_resources(settings)
+        elif args.command == "init-invoices":
+            setup_invoices(settings)
+        elif args.command == "init-attachments":
+            setup_attachments(settings)
         elif args.command == "show-identity":
             import json
             print(json.dumps(store.get_personnel_by_username(args.username).model_dump(), ensure_ascii=False))

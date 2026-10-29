@@ -1,4 +1,4 @@
-"""Password accounts and revocable, tenant-scoped PostgreSQL sessions."""
+"""Password accounts and revocable, user-scoped PostgreSQL sessions."""
 
 import hashlib
 import re
@@ -85,7 +85,6 @@ def setup_auth(settings):
     with memory_connection(settings) as connection, connection.transaction():
         connection.execute("""
             CREATE TABLE IF NOT EXISTS auth_users (
-                company_id TEXT NOT NULL,
                 user_id TEXT NOT NULL,
                 username TEXT NOT NULL,
                 password_hash TEXT NOT NULL,
@@ -93,37 +92,33 @@ def setup_auth(settings):
                 failed_attempts INTEGER NOT NULL DEFAULT 0,
                 locked_until TIMESTAMPTZ,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                PRIMARY KEY (company_id, user_id),
-                UNIQUE (company_id, username)
+                PRIMARY KEY (user_id),
+                UNIQUE (username)
             )
         """)
         connection.execute("""
             CREATE TABLE IF NOT EXISTS auth_sessions (
                 token_hash TEXT PRIMARY KEY,
-                company_id TEXT NOT NULL,
                 user_id TEXT NOT NULL,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                 expires_at TIMESTAMPTZ NOT NULL,
-                FOREIGN KEY (company_id, user_id)
-                    REFERENCES auth_users(company_id, user_id) ON DELETE CASCADE
+                FOREIGN KEY (user_id)
+                    REFERENCES auth_users(user_id) ON DELETE CASCADE
             )
         """)
-        connection.execute("CREATE INDEX IF NOT EXISTS auth_sessions_user "
-                           "ON auth_sessions(company_id,user_id)")
+        connection.execute('CREATE INDEX IF NOT EXISTS auth_sessions_user ON auth_sessions(user_id)')
         connection.execute("CREATE INDEX IF NOT EXISTS auth_sessions_expiry ON auth_sessions(expires_at)")
         connection.execute("""
             CREATE TABLE IF NOT EXISTS auth_login_limits (
-                company_id TEXT NOT NULL,
                 client_hash TEXT NOT NULL,
                 attempts INTEGER NOT NULL,
                 expires_at TIMESTAMPTZ NOT NULL,
-                PRIMARY KEY (company_id, client_hash)
+                PRIMARY KEY (client_hash)
             )
         """)
 
         connection.execute("""
             CREATE TABLE IF NOT EXISTS auth_personnel (
-                company_id TEXT NOT NULL,
                 user_id TEXT NOT NULL,
                 personnel_type TEXT,
                 academic_title TEXT,
@@ -131,9 +126,9 @@ def setup_auth(settings):
                 management_grade INTEGER,
                 lodging_standard TEXT,
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                PRIMARY KEY (company_id, user_id),
-                FOREIGN KEY (company_id, user_id)
-                    REFERENCES auth_users(company_id, user_id) ON DELETE CASCADE
+                PRIMARY KEY (user_id),
+                FOREIGN KEY (user_id)
+                    REFERENCES auth_users(user_id) ON DELETE CASCADE
             )
         """)
 
@@ -142,7 +137,6 @@ class AuthStore:
     def __init__(self, settings, config: AuthSettings):
         self.settings = settings
         self.config = config
-        self.company = settings.memory_company_id
 
     def check(self):
         with memory_connection(self.settings) as connection:
@@ -157,50 +151,41 @@ class AuthStore:
         user_id = uuid.uuid4().hex
         with memory_connection(self.settings) as connection:
             connection.execute(
-                "INSERT INTO auth_users(company_id,user_id,username,password_hash) VALUES(%s,%s,%s,%s)",
-                (self.company, user_id, username, encoded),
+                'INSERT INTO auth_users(user_id,username,password_hash) VALUES(%s,%s,%s)',
+                (user_id, username, encoded),
             )
-        return MemoryIdentity(self.company, user_id)
+        return MemoryIdentity(user_id)
 
     def manage_user(self, username, *, password=None, active=None):
         username = username_value(username)
         encoded = hash_password(password) if password is not None else None
         with memory_connection(self.settings) as connection, connection.transaction():
             row = connection.execute(
-                "SELECT user_id FROM auth_users WHERE company_id=%s AND username=%s FOR UPDATE",
-                (self.company, username),
+                'SELECT user_id FROM auth_users WHERE username=%s FOR UPDATE',
+                (username,),
             ).fetchone()
             if row is None:
                 raise ValueError("Account not found")
             connection.execute(
-                "UPDATE auth_users SET password_hash=COALESCE(%s,password_hash), "
-                "active=COALESCE(%s,active),failed_attempts=0,locked_until=NULL "
-                "WHERE company_id=%s AND user_id=%s",
-                (encoded, active, self.company, row["user_id"]),
+                'UPDATE auth_users SET password_hash=COALESCE(%s,password_hash), active=COALESCE(%s,active),failed_attempts=0,locked_until=NULL WHERE user_id=%s',
+                (encoded, active, row["user_id"]),
             )
-            connection.execute("DELETE FROM auth_sessions WHERE company_id=%s AND user_id=%s",
-                               (self.company, row["user_id"]))
+            connection.execute('DELETE FROM auth_sessions WHERE user_id=%s',
+                               (row["user_id"],))
 
     def login(self, username, password, client):
         username = username_value(username)
         with memory_connection(self.settings) as connection:
             # Atomic fixed windows work across processes; do not trust forwarded IP headers.
             rate = connection.execute(
-                "INSERT INTO auth_login_limits(company_id,client_hash,attempts,expires_at) "
-                "VALUES(%s,%s,1,now()+%s*interval '1 second') "
-                "ON CONFLICT(company_id,client_hash) DO UPDATE SET "
-                "attempts=CASE WHEN auth_login_limits.expires_at<=now() THEN 1 "
-                "ELSE auth_login_limits.attempts+1 END, "
-                "expires_at=CASE WHEN auth_login_limits.expires_at<=now() THEN excluded.expires_at "
-                "ELSE auth_login_limits.expires_at END RETURNING attempts",
-                (self.company, token_digest(client), self.config.rate_seconds),
+                "INSERT INTO auth_login_limits(client_hash,attempts,expires_at) VALUES(%s,1,now()+%s*interval '1 second') ON CONFLICT(client_hash) DO UPDATE SET attempts=CASE WHEN auth_login_limits.expires_at<=now() THEN 1 ELSE auth_login_limits.attempts+1 END, expires_at=CASE WHEN auth_login_limits.expires_at<=now() THEN excluded.expires_at ELSE auth_login_limits.expires_at END RETURNING attempts",
+                (token_digest(client), self.config.rate_seconds),
             ).fetchone()
             if rate["attempts"] > self.config.rate_limit:
                 raise LoginLimited()
             with connection.transaction():
                 user = connection.execute(
-                    "SELECT *, locked_until>now() AS locked FROM auth_users "
-                    "WHERE company_id=%s AND username=%s FOR UPDATE", (self.company, username),
+                    'SELECT *, locked_until>now() AS locked FROM auth_users WHERE username=%s FOR UPDATE', (username,),
                 ).fetchone()
                 valid = PASSWORD_HASH.verify(password, user["password_hash"] if user else DUMMY_HASH)
                 if user is None:
@@ -209,24 +194,17 @@ class AuthStore:
                     return None
                 if not valid:
                     connection.execute(
-                        "UPDATE auth_users SET failed_attempts="
-                        "CASE WHEN locked_until IS NOT NULL THEN 1 ELSE failed_attempts+1 END, "
-                        "locked_until=CASE WHEN "
-                        "(CASE WHEN locked_until IS NOT NULL THEN 1 ELSE failed_attempts+1 END)>=%s "
-                        "THEN now()+%s*interval '1 second' ELSE NULL END "
-                        "WHERE company_id=%s AND user_id=%s",
-                        (self.config.max_failures, self.config.lock_seconds, self.company, user["user_id"]),
+                        "UPDATE auth_users SET failed_attempts=CASE WHEN locked_until IS NOT NULL THEN 1 ELSE failed_attempts+1 END, locked_until=CASE WHEN (CASE WHEN locked_until IS NOT NULL THEN 1 ELSE failed_attempts+1 END)>=%s THEN now()+%s*interval '1 second' ELSE NULL END WHERE user_id=%s",
+                        (self.config.max_failures, self.config.lock_seconds, user["user_id"]),
                     )
                     return None
                 connection.execute(
-                    "UPDATE auth_users SET failed_attempts=0,locked_until=NULL "
-                    "WHERE company_id=%s AND user_id=%s", (self.company, user["user_id"]),
+                    'UPDATE auth_users SET failed_attempts=0,locked_until=NULL WHERE user_id=%s', (user["user_id"],),
                 )
                 token = secrets.token_urlsafe(32)
                 connection.execute(
-                    "INSERT INTO auth_sessions(token_hash,company_id,user_id,expires_at) "
-                    "VALUES(%s,%s,%s,now()+%s*interval '1 second')",
-                    (token_digest(token), self.company, user["user_id"], self.config.session_seconds),
+                    "INSERT INTO auth_sessions(token_hash,user_id,expires_at) VALUES(%s,%s,now()+%s*interval '1 second')",
+                    (token_digest(token), user["user_id"], self.config.session_seconds),
                 )
                 return token
 
@@ -235,37 +213,34 @@ class AuthStore:
             return None
         with memory_connection(self.settings) as connection:
             return connection.execute(
-                "SELECT u.company_id,u.user_id,u.username FROM auth_sessions s "
-                "JOIN auth_users u USING(company_id,user_id) "
-                "WHERE s.token_hash=%s AND s.company_id=%s AND s.expires_at>now() AND u.active",
-                (token_digest(token), self.company),
+                'SELECT u.user_id,u.username FROM auth_sessions s JOIN auth_users u USING(user_id) WHERE s.token_hash=%s AND s.expires_at>now() AND u.active',
+                (token_digest(token),),
             ).fetchone()
 
     def logout(self, token):
         if isinstance(token, str) and len(token) <= 128:
             with memory_connection(self.settings) as connection:
-                connection.execute("DELETE FROM auth_sessions WHERE token_hash=%s AND company_id=%s",
-                                   (token_digest(token), self.company))
+                connection.execute('DELETE FROM auth_sessions WHERE token_hash=%s',
+                                   (token_digest(token),))
 
 
     def get_personnel_by_username(self, username):
         username = username_value(username)
         with memory_connection(self.settings) as connection:
             user = connection.execute(
-                "SELECT user_id FROM auth_users WHERE company_id=%s AND username=%s",
-                (self.company, username),
+                'SELECT user_id FROM auth_users WHERE username=%s',
+                (username,),
             ).fetchone()
         if user is None:
             raise ValueError("账号不存在")
-        return self.get_personnel(user["user_id"])
+        return self.get_personnel(user["user_id"],)
 
     def get_personnel(self, user_id):
         from .personnel import PersonnelProfile
         with memory_connection(self.settings) as connection:
             row = connection.execute(
-                "SELECT personnel_type, academic_title, technical_grade, management_grade, lodging_standard "
-                "FROM auth_personnel WHERE company_id=%s AND user_id=%s",
-                (self.company, user_id),
+                'SELECT personnel_type, academic_title, technical_grade, management_grade, lodging_standard FROM auth_personnel WHERE user_id=%s',
+                (user_id,),
             ).fetchone()
         return PersonnelProfile.model_validate(dict(row)) if row else PersonnelProfile()
 
@@ -275,26 +250,19 @@ class AuthStore:
         profile = profile if isinstance(profile, PersonnelProfile) else PersonnelProfile.model_validate(profile)
         with memory_connection(self.settings) as connection, connection.transaction():
             user = connection.execute(
-                "SELECT user_id FROM auth_users WHERE company_id=%s AND username=%s",
-                (self.company, username),
+                'SELECT user_id FROM auth_users WHERE username=%s',
+                (username,),
             ).fetchone()
             if user is None:
                 raise ValueError("账号不存在")
             connection.execute(
-                "INSERT INTO auth_personnel(company_id,user_id,personnel_type,academic_title,"
-                "technical_grade,management_grade,lodging_standard) VALUES(%s,%s,%s,%s,%s,%s,%s) "
-                "ON CONFLICT(company_id,user_id) DO UPDATE SET "
-                "personnel_type=excluded.personnel_type, academic_title=excluded.academic_title, "
-                "technical_grade=excluded.technical_grade, management_grade=excluded.management_grade, "
-                "lodging_standard=excluded.lodging_standard, updated_at=now()",
-                (self.company, user["user_id"], profile.personnel_type, profile.academic_title,
+                'INSERT INTO auth_personnel(user_id,personnel_type,academic_title,technical_grade,management_grade,lodging_standard) VALUES(%s,%s,%s,%s,%s,%s) ON CONFLICT(user_id) DO UPDATE SET personnel_type=excluded.personnel_type, academic_title=excluded.academic_title, technical_grade=excluded.technical_grade, management_grade=excluded.management_grade, lodging_standard=excluded.lodging_standard, updated_at=now()',
+                (user["user_id"], profile.personnel_type, profile.academic_title,
                  profile.technical_grade, profile.management_grade, profile.lodging_standard),
             )
         return profile
 
     def prune(self):
         with memory_connection(self.settings) as connection, connection.transaction():
-            connection.execute("DELETE FROM auth_sessions WHERE company_id=%s AND expires_at<=now()",
-                               (self.company,))
-            connection.execute("DELETE FROM auth_login_limits WHERE company_id=%s AND expires_at<=now()",
-                               (self.company,))
+            connection.execute('DELETE FROM auth_sessions WHERE expires_at<=now()')
+            connection.execute('DELETE FROM auth_login_limits WHERE expires_at<=now()')

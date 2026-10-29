@@ -21,7 +21,7 @@ def recommendation_fixture(scope="combined", *, omit_sources=False, citation_mod
                            trip_changes=None, legacy_rules=False, row_transform=None,
                            lodging_standard=None):
     bundle = prepare_package(Path(__file__).resolve().parents[1] /
-                             "policies/hfut-2026/manifest.json", company_id="citation-test")
+                             "policies/hfut-2026/manifest.json")
     clauses = set(bundle.rules["source_clauses"]["scope"] + bundle.rules["source_clauses"]["transport"])
     rows = [{"chunk_id": c.id, "clause": c.clause, "section": c.section,
              "content": c.text, "table_data": c.table, "related_ids": c.related_ids}

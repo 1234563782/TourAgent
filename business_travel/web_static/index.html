@@ -4,90 +4,309 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
-  <title>Aligo · 高校差旅</title>
+  <title>Aligo · 高校差旅智能助手</title>
   <link rel="icon" href="/static/brand.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/app.css">
   <script src="/static/chat-stream.js" defer></script>
   <script src="/static/message-view.js" defer></script>
+  <script src="/static/invoices.js" defer></script>
   <script src="/static/app.js" defer></script>
 </head>
 <body>
+  <!-- 顶部导航栏 -->
   <header class="topbar">
-    <a class="brand" href="/" aria-label="Aligo 首页">
-      <img src="/static/brand.svg" width="32" height="32" alt="">
-      <span>Aligo <small>高校差旅</small></span>
-    </a>
-    <span class="environment">个人工作台</span>
-  </header>
-  <main>
-    <p id="boot" class="boot" role="status">正在加载…</p>
-    <section id="login-view" class="login" hidden aria-labelledby="login-title">
-      <p class="eyebrow">ALIGO / WORKSPACE</p>
-      <h1 id="login-title">登录工作台</h1>
-      <form id="login-form">
-        <label for="username">账号</label>
-        <input id="username" name="username" autocomplete="username" required
-               minlength="3" maxlength="64" pattern="[A-Za-z0-9_-]{3,64}"
-               autocapitalize="none" spellcheck="false">
-        <label for="password">密码</label>
-        <input id="password" name="password" type="password" autocomplete="current-password"
-               required maxlength="128">
-        <label class="check"><input id="show-password" type="checkbox">显示密码</label>
-        <p id="login-error" class="error" role="alert" hidden></p>
-        <button id="login-submit" type="submit" class="primary">登录</button>
-      </form>
-    </section>
-    <section id="workspace" class="workspace" hidden aria-labelledby="workspace-title">
-      <div class="workspace-heading">
-        <div><p class="eyebrow">MY WORKSPACE</p><h1 id="workspace-title">我的差旅</h1></div>
-        <div class="account"><span id="account-name"></span><button id="logout" type="button">退出登录</button></div>
+    <div class="topbar-inner">
+      <a class="brand" href="/" aria-label="Aligo 首页">
+        <div class="brand-icon-wrap">
+          <img src="/static/brand.svg" width="28" height="28" alt="Aligo Logo">
+        </div>
+        <div class="brand-text">
+          <span class="brand-name">Aligo</span>
+          <span class="brand-badge">高校差旅</span>
+        </div>
+      </a>
+      <div class="topbar-right">
+        <span class="environment-pill">
+          <span class="status-dot"></span>个人工作台
+        </span>
       </div>
-      <dl class="identity">
-        <div><dt>组织</dt><dd id="company"></dd></div>
-        <div><dt>用户 ID</dt><dd id="user-id"></dd></div>
-      </dl>
-      <section class="chat-panel" aria-labelledby="chat-title">
-        <div class="section-bar"><h2 id="chat-title">差旅助手</h2><button id="chat-reload" type="button">刷新会话</button></div>
-        <div class="conversation-layout">
-        <aside class="conversation-sidebar" aria-label="历史对话">
-          <button id="chat-new" type="button">新对话</button>
-          <nav id="conversation-list" aria-label="选择对话"></nav>
-          <button id="conversations-more" type="button" hidden>更多对话</button>
-        </aside>
-        <div class="conversation-main">
-        <h3 id="conversation-title">对话</h3>
-        <div id="chat-messages" class="chat-messages" aria-live="polite"></div>
-        <p id="chat-status" role="status"></p>
-        <p id="chat-error" class="error" role="alert" hidden></p>
-        <button id="chat-recover" type="button" hidden>核实并恢复</button>
-        <form id="chat-form">
-          <textarea id="chat-input" rows="3" maxlength="3000" aria-label="消息" placeholder="输入消息" required></textarea>
-          <button id="chat-submit" class="primary" type="submit">发送</button>
+    </div>
+  </header>
+
+  <main>
+    <div id="boot" class="boot" role="status">
+      <div class="boot-spinner"></div>
+      <span>正在安全连接工作台…</span>
+    </div>
+
+    <!-- 登录视图 -->
+    <section id="login-view" class="login" hidden aria-labelledby="login-title">
+      <div class="login-card">
+        <div class="login-header">
+          <div class="login-logo-wrap">
+            <img src="/static/brand.svg" width="36" height="36" alt="">
+          </div>
+          <p class="eyebrow">ALIGO WORKSPACE</p>
+          <h1 id="login-title">登录差旅工作台</h1>
+          <p class="login-subtitle">高校差标标准核验 · 发票预审 · 智能差旅行程</p>
+        </div>
+        <form id="login-form">
+          <div class="form-group">
+            <label for="username">账号</label>
+            <div class="input-with-icon">
+              <input id="username" name="username" autocomplete="username" required
+                     minlength="3" maxlength="64" pattern="[A-Za-z0-9_-]{3,64}"
+                     placeholder="输入工号或用户名"
+                     autocapitalize="none" spellcheck="false">
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="password">密码</label>
+            <div class="input-with-icon">
+              <input id="password" name="password" type="password" autocomplete="current-password"
+                     placeholder="输入账户密码"
+                     required maxlength="128">
+            </div>
+          </div>
+          <div class="form-actions-row">
+            <label class="check">
+              <input id="show-password" type="checkbox">
+              <span>显示密码</span>
+            </label>
+          </div>
+          <p id="login-error" class="error" role="alert" hidden></p>
+          <button id="login-submit" type="submit" class="primary btn-block">登 录</button>
         </form>
-        <div id="chat-confirm" hidden>
-          <p>助手需要你的确认才能继续。</p>
-          <pre id="chat-details"></pre>
-          <button id="chat-yes" type="button">确认</button>
-          <button id="chat-no" type="button">取消</button>
+      </div>
+    </section>
+
+    <!-- 工作台主界面 -->
+    <section id="workspace" class="workspace" hidden aria-labelledby="workspace-title">
+      <!-- 顶部工作区卡片 -->
+      <div class="workspace-header-card">
+        <div class="workspace-heading">
+          <div class="workspace-title-group">
+            <p class="eyebrow">WORKSPACE CONSOLE</p>
+            <h1 id="workspace-title">高校差旅中心</h1>
+          </div>
+          <div class="account">
+            <div class="account-avatar">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            </div>
+            <span id="account-name" class="account-name"></span>
+            <button id="logout" type="button" class="btn-secondary btn-sm">退出登录</button>
+          </div>
         </div>
+
+        <div class="identity-grid">
+          <div class="identity-card">
+            <div class="identity-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="2"/><path d="M15 8h2M15 12h2M7 16h10"/></svg>
+            </div>
+            <div class="identity-info">
+              <span class="identity-label">用户唯一标识</span>
+              <strong id="user-id" class="identity-val">-</strong>
+            </div>
+          </div>
         </div>
+      </div>
+
+      <!-- 模块标签切换导航（辅助视觉与层级） -->
+      <div class="workspace-tabs-bar">
+        <a href="#chat-section" class="tab-pill active">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          智能差旅助手
+        </a>
+        <a href="#invoice-section" class="tab-pill">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          发票预审与验标
+        </a>
+      </div>
+
+      <!-- 差旅智能助手板块 -->
+      <section id="chat-section" class="panel-card chat-panel" aria-labelledby="chat-title">
+        <div class="panel-header">
+          <div class="panel-title-wrap">
+            <div class="panel-icon chat-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            </div>
+            <div>
+              <h2 id="chat-title">差旅智能助手</h2>
+              <span class="panel-subtitle">支持合规问答、行程比价、标准核验与自然语言交互</span>
+            </div>
+          </div>
+          <div class="panel-actions">
+            <button id="chat-reload" type="button" class="btn-ghost btn-sm">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+              刷新会话
+            </button>
+          </div>
         </div>
+
+        <div class="conversation-layout">
+          <!-- 会话历史侧边栏 -->
+          <aside class="conversation-sidebar" aria-label="历史对话">
+            <div class="sidebar-top">
+              <button id="chat-new" type="button" class="btn-primary-soft btn-block">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                新建对话
+              </button>
+            </div>
+            <div class="sidebar-label">历史对话记录</div>
+            <nav id="conversation-list" aria-label="选择对话"></nav>
+            <button id="conversations-more" type="button" class="btn-ghost btn-sm btn-block" hidden>加载更多对话</button>
+          </aside>
+
+          <!-- 会话主对话区 -->
+          <div class="conversation-main">
+            <div class="conversation-header-bar">
+              <h3 id="conversation-title">当前会话</h3>
+              <button id="chat-recover" type="button" class="btn-warning btn-sm" hidden>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                核实并恢复执行
+              </button>
+            </div>
+
+            <!-- 消息流容器 -->
+            <div id="chat-messages" class="chat-messages" aria-live="polite"></div>
+
+            <!-- 状态提示 -->
+            <div class="chat-feedback-wrap">
+              <p id="chat-status" class="chat-status-indicator" role="status"></p>
+              <p id="chat-error" class="error" role="alert" hidden></p>
+            </div>
+
+            <!-- 确认动作区（中断挂起恢复） -->
+            <div id="chat-confirm" class="confirm-box" hidden>
+              <div class="confirm-header">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#b45309" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                <strong>助手需要您的确认才能继续执行任务</strong>
+              </div>
+              <pre id="chat-details"></pre>
+              <div class="confirm-buttons">
+                <button id="chat-yes" type="button" class="primary btn-sm">确认继续</button>
+                <button id="chat-no" type="button" class="btn-secondary btn-sm">取消操作</button>
+              </div>
+            </div>
+
+            <!-- 发送表单 -->
+            <form id="chat-form" class="chat-input-area">
+              <div id="chat-attachments" class="chat-attachments">
+                <div class="attachment-upload-header">
+                  <label for="chat-files" class="attachment-label-btn">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                    <span>关联 XML 附件</span>
+                  </label>
+                  <input id="chat-files" type="file" accept=".xml,application/xml,text/xml" multiple>
+                  <span class="attachment-tip">支持上传数电票 XML，作为本轮咨询参考资料</span>
+                </div>
+                <p id="chat-attachment-status" class="invoice-help" role="status"></p>
+                <div id="chat-attachment-list" aria-live="polite"></div>
+              </div>
+
+              <div class="chat-composer-row">
+                <textarea id="chat-input" rows="3" maxlength="3000" aria-label="消息" placeholder="输入您的问题或需求，如：查询下周去北京参加学术会议的住宿差标并推荐酒店…" required></textarea>
+                <button id="chat-submit" class="primary chat-send-btn" type="submit" title="发送 (Enter)">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                  <span>发送</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <!-- 发票预审板块 -->
+      <section id="invoice-section" class="panel-card invoice-panel" aria-labelledby="invoice-title">
+        <div class="panel-header">
+          <div class="panel-title-wrap">
+            <div class="panel-icon invoice-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            </div>
+            <div>
+              <h2 id="invoice-title">发票预审与差标核验</h2>
+              <span class="panel-subtitle">XML 原件解析 · 票面字段与金额勾稽校验 · 差标超标预警</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-intro-alert">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+          <p class="invoice-notice">本地检查票面要素、金额勾稽及系统查重。此工具未接入税务局官方验签系统，结果仅作为报销前参考，不作为最终报销审批凭据。</p>
+        </div>
+
+        <form id="invoice-form" class="invoice-upload-card">
+          <div class="file-dropzone">
+            <div class="dropzone-icon">
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            </div>
+            <label for="invoice-files" class="dropzone-label">点击选择数电票 XML 文件（支持 EInvoice 0.32 增值税发票）</label>
+            <input id="invoice-files" type="file" accept=".xml,application/xml,text/xml" multiple required>
+            <p id="invoice-limit" class="invoice-help">正在读取上传限制…</p>
+          </div>
+          <div class="upload-btn-row">
+            <button id="invoice-submit" type="submit" class="primary" disabled>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+              开始逐票预审
+            </button>
+          </div>
+        </form>
+
+        <div class="invoice-status-bar">
+          <p id="invoice-status" role="status">尚未导入票据。可先上传发票检查票面，再逐票补充出差事实进行差标精准测算。</p>
+          <p id="invoice-error" class="error" role="alert" hidden></p>
+        </div>
+
+        <!-- 发票结果渲染容器 -->
+        <div id="invoice-results" class="invoice-results-container"></div>
       </section>
     </section>
   </main>
+
+  <!-- 恢复对话模态弹窗 -->
   <dialog id="recovery-dialog" aria-labelledby="recovery-title">
-    <h2 id="recovery-title">核实失败执行</h2>
-    <p id="recovery-notice"></p>
-    <p id="recovery-source"></p>
-    <h3>请求开始后保存的行程草案</h3>
-    <pre id="recovery-trips"></pre>
-    <label class="check"><input id="recovery-reviewed" type="checkbox">我已核实以上记录</label>
-    <p id="recovery-error" class="error" role="alert" hidden></p>
-    <div class="dialog-actions">
-      <button id="recovery-cancel" type="button">取消</button>
-      <button id="recovery-submit" type="button" disabled>确认并建立恢复对话</button>
+    <div class="dialog-content">
+      <div class="dialog-header">
+        <div class="dialog-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        </div>
+        <div>
+          <h2 id="recovery-title">核实失败执行记录</h2>
+          <p class="dialog-desc">执行中断或未完全完成，请核实已暂存的行程状态</p>
+        </div>
+      </div>
+      <div class="dialog-body">
+        <p id="recovery-notice" class="recovery-text-callout"></p>
+        <p id="recovery-source" class="recovery-source-tip"></p>
+        <div class="recovery-pre-wrap">
+          <h3 class="recovery-pre-title">请求开始后保存的行程草案</h3>
+          <pre id="recovery-trips"></pre>
+        </div>
+        <label class="check recovery-check">
+          <input id="recovery-reviewed" type="checkbox">
+          <span>我已仔细核对以上数据记录，同意基于此状态恢复</span>
+        </label>
+        <p id="recovery-error" class="error" role="alert" hidden></p>
+      </div>
+      <div class="dialog-actions">
+        <button id="recovery-cancel" type="button" class="btn-secondary">取消</button>
+        <button id="recovery-submit" type="button" class="primary" disabled>确认并建立恢复对话</button>
+      </div>
     </div>
   </dialog>
-  <footer>Aligo <span>高校差旅工作台</span></footer>
+
+  <footer>
+    <div class="footer-inner">
+      <div class="footer-left">
+        <strong>Aligo</strong> · 高校差旅合规与智能辅助平台
+      </div>
+      <div class="footer-right">
+        安全同源加密 · 差标实时核对 · 电子发票智能预审
+      </div>
+    </div>
+  </footer>
 </body>
 </html>

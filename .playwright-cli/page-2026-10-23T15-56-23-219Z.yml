@@ -1,0 +1,22 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - link "Aligo 首页" [ref=e3] [cursor=pointer]:
+      - /url: /
+      - generic [ref=e4]: Aligo 高校差旅
+    - generic [ref=e5]: 个人工作台
+  - main [ref=e6]:
+    - region [ref=e7]:
+      - paragraph [ref=e8]: ALIGO / WORKSPACE
+      - heading "登录工作台" [level=1] [ref=e9]
+      - generic [ref=e10]:
+        - generic [ref=e11]: 账号
+        - textbox "账号" [ref=e12]
+        - generic [ref=e13]: 密码
+        - textbox "密码" [ref=e14]
+        - generic [ref=e15]:
+          - checkbox "显示密码" [ref=e16]
+          - text: 显示密码
+        - button "登录" [ref=e17] [cursor=pointer]
+  - contentinfo [ref=e18]:
+    - text: Aligo
+    - generic [ref=e19]: 高校差旅工作台

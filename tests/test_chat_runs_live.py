@@ -39,13 +39,13 @@ class ChatRunLiveTests(unittest.TestCase):
             connection.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(cls.schema)))
 
     def setUp(self):
-        self.identity = MemoryIdentity(self.settings.memory_company_id, uuid4().hex)
+        self.identity = MemoryIdentity(uuid4().hex)
         self.registry = ConversationStore(self.settings, self.identity)
         self.conversation = self.registry.create()["id"]
         self.runs = ChatRunStore(self.settings, self.identity, self.conversation)
         self.auth = Mock()
         self.auth.current_user.return_value = {
-            "company_id": self.identity.company_id, "user_id": self.identity.user_id, "username": "fixture"}
+            "user_id": self.identity.user_id, "username": "fixture"}
         self.calls = 0
         self.writes = 0
         self.fail = False
@@ -188,15 +188,13 @@ class ChatRunLiveTests(unittest.TestCase):
         self.assertEqual(self.client.get(
             f"/api/conversations/{other_conversation}/runs/{payload['request_id']}").status_code, 404)
         self.auth.current_user.return_value = {
-            "company_id": self.identity.company_id, "user_id": uuid4().hex, "username": "other"}
+            "user_id": uuid4().hex, "username": "other"}
         for path in ("/runs", "/runs/" + payload["request_id"], "/chat"):
             self.assertEqual(self.client.get(self.route + path).status_code, 404)
         self.assertEqual(self.send(payload).status_code, 404)
-        other = ChatRunStore(self.settings, MemoryIdentity(self.identity.company_id, uuid4().hex),
+        other = ChatRunStore(self.settings, MemoryIdentity(uuid4().hex),
                              self.conversation)
         self.assertIsNone(other.get(payload["request_id"]))
-        with self.assertRaises(PermissionError):
-            ChatRunStore(self.settings, MemoryIdentity("other-company", uuid4().hex), self.conversation)
         self.assertEqual(self.calls, 1)
 
     def test_request_id_is_scoped_by_conversation(self):

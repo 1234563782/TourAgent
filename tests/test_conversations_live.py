@@ -50,7 +50,7 @@ class ConversationLiveTests(unittest.TestCase):
             connection.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(cls.schema)))
 
     def setUp(self):
-        self.identity = MemoryIdentity(self.settings.memory_company_id, uuid4().hex)
+        self.identity = MemoryIdentity(uuid4().hex)
         self.store = ConversationStore(self.settings, self.identity)
 
     def test_create_list_restore_title_pagination_and_legacy(self):
@@ -69,7 +69,7 @@ class ConversationLiveTests(unittest.TestCase):
 
     def test_foreign_ids_and_invalid_ids_are_denied(self):
         ident = self.store.create()["id"]
-        other = ConversationStore(self.settings, MemoryIdentity(self.identity.company_id, uuid4().hex))
+        other = ConversationStore(self.settings, MemoryIdentity(uuid4().hex))
         with self.assertRaises(LookupError):
             other.require(ident)
         other.touch(ident, "changed")
@@ -108,7 +108,7 @@ class ConversationLiveTests(unittest.TestCase):
         saved = PostgresTravelMemory(self.settings, self.identity).read()
         self.assertEqual(saved["trip_history"], [shared])
         self.assertNotIn("preferences", saved)
-        other = MemoryIdentity(self.identity.company_id, uuid4().hex)
+        other = MemoryIdentity(uuid4().hex)
         self.assertEqual(PostgresTravelMemory(self.settings, other).read()["trip_history"], [])
 
     def test_locks_are_per_conversation_and_release_after_contention(self):

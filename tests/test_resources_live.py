@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 import unittest
 from uuid import uuid4
 
@@ -15,7 +16,8 @@ from psycopg_pool import PoolTimeout
 
 from business_travel.db_pool import _pool, pooled_connection
 from business_travel.memory_pg import MemoryIdentity, memory_connection
-from business_travel.resources import execution_resources, AdmissionRejected, Slots, setup_resources
+from business_travel.resources import (execution_resources, AdmissionRejected, CallBudgetExceeded,
+                                       RunDeadlineExceeded, Slots, setup_resources)
 from business_travel.settings import Settings
 from tests import test_chat_runs_live as fixtures
 
@@ -40,9 +42,11 @@ class ResourceLiveTests(unittest.TestCase):
             connection.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(cls.schema)))
 
     def setUp(self):
-        # Company scope remains unique for school-level daily quota isolation.
-        self.settings = replace(self.settings, memory_company_id=uuid4().hex)
-        self.identity = MemoryIdentity(self.settings.memory_company_id, uuid4().hex)
+        # Each case gets a clean school-wide ledger in this disposable schema.
+        self.settings = replace(self.settings)
+        with memory_connection(self.settings) as connection:
+            connection.execute("TRUNCATE resource_daily_usage")
+        self.identity = MemoryIdentity(uuid4().hex)
 
     @contextmanager
     def admit(self, identity=None, settings=None):
@@ -54,11 +58,10 @@ class ResourceLiveTests(unittest.TestCase):
     def usage(self):
         with memory_connection(self.settings) as connection:
             return connection.execute(
-                "SELECT * FROM resource_daily_usage WHERE company_id=%s ORDER BY scope",
-                (self.identity.company_id,)).fetchall()
+                "SELECT * FROM resource_daily_usage ORDER BY scope").fetchall()
 
     def test_user_shared_across_connections_other_user_independent(self):
-        other = MemoryIdentity(self.identity.company_id, uuid4().hex)
+        other = MemoryIdentity(uuid4().hex)
         with self.admit():
             with self.assertRaises(AdmissionRejected) as caught:
                 with self.admit():
@@ -66,7 +69,7 @@ class ResourceLiveTests(unittest.TestCase):
             self.assertEqual(caught.exception.reason, "user_concurrency")
             with self.admit(other):
                 pass
-        self.assertEqual(sum(r["requests"] for r in self.usage() if r["scope"] == "company"), 2)
+        self.assertEqual(sum(r["requests"] for r in self.usage() if r["scope"] == "school"), 2)
 
     def test_separate_process_cannot_bypass_user_capacity(self):
         source = """
@@ -76,10 +79,10 @@ from business_travel.settings import Settings
 from business_travel.memory_pg import MemoryIdentity, memory_connection
 from business_travel.resources import execution_resources, AdmissionRejected
 from business_travel.db_pool import close_pools
-s = replace(Settings.from_env(), memory_schema=sys.argv[1], memory_company_id=sys.argv[2])
+s = replace(Settings.from_env(), memory_schema=sys.argv[1])
 try:
     with memory_connection(s, lane="session") as connection:
-        with execution_resources(s, MemoryIdentity(sys.argv[2], sys.argv[3]), connection):
+        with execution_resources(s, MemoryIdentity(sys.argv[2]), connection):
             print("unexpected_admission")
 except AdmissionRejected as error:
     print(error.reason)
@@ -88,24 +91,24 @@ finally:
 """
         with self.admit():
             result = subprocess.run([sys.executable, "-c", source, self.schema,
-                                     self.identity.company_id, self.identity.user_id],
+                                     self.identity.user_id],
                                     capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, "Subprocess failed; no sensitive output displayed")
         self.assertEqual(result.stdout.strip(), "user_concurrency")
 
     def test_global_limit_and_zero_queue(self):
         config = replace(self.settings, resource_global_concurrency=1, resource_queue_size=0)
-        second = replace(config, memory_company_id=uuid4().hex)
+        second = replace(config)
         with self.admit(settings=config):
             with self.assertRaises(AdmissionRejected) as caught:
-                with self.admit(MemoryIdentity(second.memory_company_id, "other"), second):
+                with self.admit(MemoryIdentity("other"), second):
                     pass
             self.assertEqual(caught.exception.reason, "queue_full")
 
     def test_queue_wakes_after_capacity_released(self):
         config = replace(self.settings, resource_global_concurrency=1,
                          resource_queue_timeout=2)
-        other = MemoryIdentity(self.identity.company_id, uuid4().hex)
+        other = MemoryIdentity(uuid4().hex)
         waiting = threading.Event()
         def next_request():
             waiting.set()
@@ -120,7 +123,7 @@ finally:
 
     def test_bounded_queue_full_and_timeout_release_all_slots(self):
         config = replace(self.settings, resource_global_concurrency=1, resource_queue_size=1)
-        other = MemoryIdentity(self.identity.company_id, uuid4().hex)
+        other = MemoryIdentity(uuid4().hex)
         with self.admit(settings=config), memory_connection(config, lane="session") as connection:
             waiting = Slots(connection, config)
             key = waiting.acquire(("queue",), 1)
@@ -162,13 +165,13 @@ finally:
         for row in self.usage():
             self.assertEqual((row["requests"], row["model_calls"]), (1, 0))
 
-    def test_atomic_company_daily_quota_under_contention(self):
-        config = replace(self.settings, resource_company_daily_requests=1)
+    def test_atomic_school_daily_quota_under_contention(self):
+        config = replace(self.settings, resource_school_daily_requests=1)
         barrier = threading.Barrier(2)
         def run():
             barrier.wait(3)
             try:
-                with self.admit(MemoryIdentity(self.identity.company_id, uuid4().hex), config):
+                with self.admit(MemoryIdentity(uuid4().hex), config):
                     return "ok"
             except AdmissionRejected as error:
                 return error.reason
@@ -187,9 +190,10 @@ finally:
         self.assertEqual(self.usage()[-1]["model_calls"], 1)
 
     def test_disconnect_releases_slots_but_preserves_crash_reservation(self):
-        with self.assertRaises(Exception):
-            with self.admit() as budget:
-                budget.connection.close()
+        with self.admit() as budget:
+            budget.connection.close()
+        # A dead session releases its own locks. Settlement cannot refund an
+        # ambiguous reservation, and a failing cleanup never raises on its own.
         self.assertEqual(self.usage()[-1]["model_calls"], 2)
         with self.admit():
             pass
@@ -212,15 +216,14 @@ finally:
         with self.assertRaises(RuntimeError):
             with memory_connection(config) as connection, connection.transaction():
                 connection.execute(
-                    "INSERT INTO resource_daily_usage(company_id,scope,subject_id,usage_day) "
-                    "VALUES(%s,'user',%s,(now() AT TIME ZONE 'UTC')::date)",
-                    (self.identity.company_id, self.identity.user_id))
+                    "INSERT INTO resource_daily_usage(scope,subject_id,usage_day) "
+                    "VALUES('user',%s,(now() AT TIME ZONE 'UTC')::date)",
+                    (self.identity.user_id,))
                 raise RuntimeError("synthetic")
         with memory_connection(config) as connection:
             self.assertEqual(connection.execute("SHOW search_path").fetchone()["search_path"], self.schema)
             self.assertEqual(connection.execute(
-                "SELECT count(*) AS n FROM resource_daily_usage WHERE company_id=%s",
-                (self.identity.company_id,)).fetchone()["n"], 0)
+                "SELECT count(*) AS n FROM resource_daily_usage").fetchone()["n"], 0)
 
     def test_refund_uses_reserved_day_not_day_at_completion(self):
         from datetime import datetime, timedelta, timezone
@@ -228,18 +231,50 @@ finally:
         yesterday = datetime.now(timezone.utc).date() - timedelta(days=1)
         # Simulate an admission from the previous UTC day, alongside today's row.
         with memory_connection(self.settings) as connection:
-            for scope, subject in (("company", self.identity.company_id), ("user", self.identity.user_id)):
+            for scope, subject in (("school", "school"), ("user", self.identity.user_id)):
                 for day in (yesterday, yesterday + timedelta(days=1)):
                     connection.execute(
                         "INSERT INTO resource_daily_usage "
-                        "(company_id,scope,subject_id,usage_day,requests,model_calls) "
-                        "VALUES(%s,%s,%s,%s,1,2)",
-                        (self.identity.company_id, scope, subject, day))
-        with patch("business_travel.resources._reserve", return_value=yesterday):
+                        "(scope,subject_id,usage_day,requests,model_calls) "
+                        "VALUES(%s,%s,%s,1,2)",
+                        (scope, subject, day))
+        with patch("business_travel.resources._reserve_request", return_value=yesterday):
             with self.admit() as budget:
                 budget.consume()
         for row in self.usage():
             self.assertEqual(row["model_calls"], 1 if row["usage_day"] == yesterday else 2)
+
+    def test_call_tranche_reserves_then_extends_and_refunds_remainder(self):
+        config = replace(self.settings, resource_request_calls=6, resource_call_tranche=2)
+        with self.admit(settings=config) as budget:
+            for _ in range(3):
+                budget.consume()
+            self.assertEqual((budget.reserved, budget.used), (4, 3))
+        # 2 + 2 reserved, 3 used: only the unused part of the extension is refunded.
+        for row in self.usage():
+            self.assertEqual((row["requests"], row["model_calls"]), (1, 3))
+
+    def test_refused_tranche_extension_is_execution_failure_not_admission(self):
+        config = replace(self.settings, resource_request_calls=5, resource_call_tranche=2,
+                         resource_user_daily_calls=3)
+        with self.assertRaises(CallBudgetExceeded):
+            with self.admit(settings=config) as budget:
+                for _ in range(5):
+                    budget.consume()
+        for row in self.usage():
+            self.assertEqual(row["model_calls"], 2)
+
+    def test_request_deadline_blocks_next_call_and_releases_slot(self):
+        config = replace(self.settings, resource_request_deadline=0.05)
+        with self.assertRaises(RunDeadlineExceeded):
+            with self.admit(settings=config) as budget:
+                time.sleep(0.1)
+                budget.consume()
+        # The slot is free again and the unused reservation was settled.
+        with self.admit(settings=config):
+            pass
+        for row in self.usage():
+            self.assertEqual(row["requests"], 2)
 
     def test_pool_exhaustion_is_bounded_and_short_pool_stays_usable(self):
         config = replace(self.settings, db_session_pool_size=1, db_pool_timeout=0.1)
@@ -254,12 +289,6 @@ finally:
                     pass
             with memory_connection(config) as connection:
                 self.assertEqual(connection.execute("SELECT 1 AS n").fetchone()["n"], 1)
-
-    def test_company_identity_cannot_be_supplied_by_untrusted_caller(self):
-        with self.assertRaises(PermissionError):
-            with self.admit(MemoryIdentity("other_company", self.identity.user_id)):
-                pass
-        self.assertEqual(self.usage(), [])
 
 
 @unittest.skipUnless(os.environ.get("TRAVEL_TEST_POSTGRES") == "1", "PostgreSQL integration is opt-in")
@@ -277,8 +306,8 @@ class ResourceHTTPLiveTests(unittest.TestCase):
         with memory_connection(self.settings) as connection:
             row = connection.execute(
                 "SELECT requests,model_calls FROM resource_daily_usage "
-                "WHERE company_id=%s AND scope='user' AND subject_id=%s",
-                (self.identity.company_id, self.identity.user_id)).fetchone()
+                "WHERE scope='user' AND subject_id=%s",
+                (self.identity.user_id,)).fetchone()
         self.assertEqual(row, {"requests": 1, "model_calls": 0})
         self.assertEqual(self.calls, 1)
 

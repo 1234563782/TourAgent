@@ -32,26 +32,23 @@ class MemorySettingsTests(unittest.TestCase):
         return Settings.from_env(self.path)
 
     def test_reuses_existing_policy_database_without_copying_secret(self):
-        settings = self.configure("TRAVEL_POLICY_DATABASE_URL=postgresql://synthetic-secret\n"
-                                  "TRAVEL_POLICY_COMPANY_ID=company\n")
+        settings = self.configure("TRAVEL_POLICY_DATABASE_URL=postgresql://synthetic-secret\n")
         self.assertEqual(settings.memory_database_url, settings.policy_database_url)
-        self.assertEqual(settings.memory_company_id, "company")
         self.assertEqual(settings.missing_memory_config(), [])
         self.assertNotIn("synthetic-secret", repr(settings))
 
     def test_explicit_database_and_blank_fallback(self):
         settings = self.configure("TRAVEL_POLICY_DATABASE_URL=policy\nTRAVEL_MEMORY_DATABASE_URL=memory\n")
         self.assertEqual(settings.memory_database_url, "memory")
-        self.assertEqual(settings.missing_memory_config(), ["TRAVEL_MEMORY_COMPANY_ID"])
+        self.assertEqual(settings.missing_memory_config(), [])
         settings = self.configure("TRAVEL_POLICY_DATABASE_URL=policy\nTRAVEL_MEMORY_DATABASE_URL=\n")
         self.assertEqual(settings.memory_database_url, "policy")
 
     def test_invalid_schema_company_and_limits(self):
         for text in ("TRAVEL_MEMORY_SCHEMA=public", "TRAVEL_MEMORY_SCHEMA=pg_catalog",
                      "TRAVEL_MEMORY_SCHEMA=x;DROP TABLE trips", "TRAVEL_MEMORY_SCHEMA=UPPER",
-                     "TRAVEL_MEMORY_COMPANY_ID=../escape", "TRAVEL_MEMORY_HISTORY_LIMIT=0",
-                     "TRAVEL_MEMORY_HISTORY_LIMIT=101", "TRAVEL_MEMORY_CONNECT_TIMEOUT=0",
-                     "TRAVEL_POLICY_COMPANY_ID=one\nTRAVEL_MEMORY_COMPANY_ID=two"):
+                     "TRAVEL_MEMORY_HISTORY_LIMIT=0",
+                     "TRAVEL_MEMORY_HISTORY_LIMIT=101", "TRAVEL_MEMORY_CONNECT_TIMEOUT=0"):
             with self.subTest(text=text), self.assertRaises(ValueError):
                 self.configure(text)
 
@@ -65,26 +62,25 @@ class MemorySettingsTests(unittest.TestCase):
 
 class ScopeTests(unittest.TestCase):
     def setUp(self):
-        self.identity = MemoryIdentity("company", "one")
+        self.identity = MemoryIdentity("one")
         self.saver = ScopedPostgresSaver(MagicMock(), self.identity)
 
     def test_thread_names_include_all_scopes(self):
-        self.assertEqual(self.identity.thread_id("same"), "company:one:same")
-        self.assertNotEqual(self.identity.thread_id("same"), MemoryIdentity("company", "two").thread_id("same"))
-        self.assertNotEqual(self.identity.thread_id("same"), MemoryIdentity("other", "one").thread_id("same"))
-        for company, user in (("../x", "one"), ("ok", "user:session"), ("", "one")):
+        self.assertEqual(self.identity.thread_id("same"), "one:same")
+        self.assertNotEqual(self.identity.thread_id("same"), MemoryIdentity("two").thread_id("same"))
+        for user in ("../x", "user:session", ""):
             with self.assertRaises(ValueError):
-                MemoryIdentity(company, user)
+                MemoryIdentity(user)
 
     def test_every_sync_checkpoint_access_rejects_other_user_before_sql(self):
-        config = {"configurable": {"thread_id": "company:two:session"}}
+        config = {"configurable": {"thread_id": "two:session"}}
         operations = [
             lambda: self.saver.get_tuple(config),
             lambda: list(self.saver.list(config)),
             lambda: list(self.saver.list(None)),
             lambda: self.saver.put(config, {}, {}, {}),
             lambda: self.saver.put_writes(config, [], "task"),
-            lambda: self.saver.delete_thread("company:two:session"),
+            lambda: self.saver.delete_thread("two:session"),
             lambda: self.saver.get_delta_channel_history(config=config, channels=["messages"]),
         ]
         with patch.object(self.saver, "_cursor", side_effect=AssertionError("SQL must not run")):
@@ -99,10 +95,10 @@ class ScopeTests(unittest.TestCase):
         read.assert_called_once_with(config)
 
     def test_identity_scope_is_not_prefix_only(self):
-        for thread in ("company:one:session:extra", "company:one:../escape"):
+        for thread in ("one:session:extra", "one:../escape"):
             with self.assertRaises(ValueError):
                 self.identity.check_thread(thread)
-        for thread in ("company:one2:session", "other:one:session", None):
+        for thread in ("one2:session", "other:one:session", None):
             with self.assertRaises(PermissionError):
                 self.identity.check_thread(thread)
 
@@ -156,15 +152,12 @@ class RepositorySQLTests(unittest.TestCase):
     def setUp(self):
         self.settings = Settings(api_key="", model="", base_url="", node_path="", flyai_cli_path="",
                                  storage_dir=Path("."), legacy_memory_dir=Path("."),
-                                 memory_company_id="company", memory_database_url="synthetic")
-        self.memory = PostgresTravelMemory(self.settings, MemoryIdentity("company", "one"))
+                                 memory_database_url="synthetic")
+        self.memory = PostgresTravelMemory(self.settings, MemoryIdentity("one"))
 
-    def test_company_mismatch_rejected(self):
-        with self.assertRaises(PermissionError):
-            PostgresTravelMemory(self.settings, MemoryIdentity("other", "one"))
 
     def test_graph_rejects_mismatched_memory_and_checkpointer(self):
-        other = ScopedPostgresSaver(MagicMock(), MemoryIdentity("company", "other"))
+        other = ScopedPostgresSaver(MagicMock(), MemoryIdentity("other"))
         for saver in (None, other):
             with self.assertRaises(PermissionError):
                 build_assistant(MagicMock(), self.settings, self.memory, MagicMock(), checkpointer=saver)
@@ -178,8 +171,8 @@ class RepositorySQLTests(unittest.TestCase):
             self.memory.save_trip(saved)
         query, params = connection.execute.call_args_list[0].args
         self.assertNotIn("DROP", query)
-        self.assertEqual(params[:2], ("company", "one"))
-        self.assertIn("ON CONFLICT(company_id,user_id,draft_id)", query)
+        self.assertEqual(params[:1], ("one",))
+        self.assertIn("ON CONFLICT(user_id,draft_id)", query)
 
     def test_invalid_writes_never_connect(self):
         with patch("business_travel.memory_pg.memory_connection") as connect:

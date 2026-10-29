@@ -81,7 +81,7 @@ def main():
     console = Console()
     telemetry = Telemetry(settings)
     try:
-        identity = MemoryIdentity(settings.memory_company_id, args.user)
+        identity = MemoryIdentity(args.user)
         memory = PostgresTravelMemory(settings, identity)
         memory.read()
         policy = PolicyStore.from_settings(settings)

@@ -3,6 +3,7 @@
 from contextlib import nullcontext
 from dataclasses import replace
 import os
+import time
 import unittest
 from unittest.mock import Mock, patch
 
@@ -11,7 +12,8 @@ from langgraph.graph import StateGraph, START, END
 
 from business_travel.context_budget import BudgetedModel
 from business_travel.graph import AgentState
-from business_travel.resources import RequestBudget, CallBudgetExceeded, _current_budget, AdmissionRejected
+from business_travel.resources import (RequestBudget, CallBudgetExceeded, RunDeadlineExceeded,
+                                       _current_budget, AdmissionRejected)
 from business_travel.settings import Settings
 from tests.test_auth import settings
 from tests import test_web_chat as web_fixtures
@@ -19,22 +21,69 @@ from tests import test_web_chat as web_fixtures
 
 class ResourceTests(unittest.TestCase):
     def test_env_configuration_and_invalid_limits(self):
+        # The ceiling must cover a full-length graph, so a smaller override only
+        # parses when max steps are lowered with it.
         with patch.dict(os.environ, {"TRAVEL_LOAD_DOTENV": "0",
-                                    "TRAVEL_RESOURCE_REQUEST_CALLS": "7",
+                                    "TRAVEL_MAX_STEPS": "20",
+                                    "TRAVEL_RESOURCE_REQUEST_CALLS": "28",
                                     "TRAVEL_RESOURCE_QUEUE_TIMEOUT": "0.25",
                                     "TRAVEL_DB_POOL_TIMEOUT": "0.5"}, clear=True):
-            self.assertEqual(Settings.from_env().resource_request_calls, 7)
+            self.assertEqual(Settings.from_env().resource_request_calls, 28)
             self.assertEqual(Settings.from_env().resource_queue_timeout, 0.25)
             self.assertEqual(Settings.from_env().db_pool_timeout, 0.5)
         for values in [
             {"resource_queue_size": -1}, {"resource_user_concurrency": 0},
             {"resource_user_concurrency": 9},
-            {"resource_queue_timeout": float("nan")}, {"resource_poll_seconds": 3},
+            {"resource_queue_timeout": float("nan")}, {"resource_poll_seconds": 11},
             {"resource_user_daily_calls": 1}, {"db_session_pool_size": 2},
             {"db_pool_waiting": 0}, {"db_pool_timeout": float("inf")},
+            # Ceiling below max steps plus repair and review headroom.
+            {"resource_request_calls": 20},
+            # Concurrency plus queue beyond the synchronous worker budget.
+            {"resource_global_concurrency": 12, "resource_queue_size": 8},
         ]:
             with self.subTest(values=values), self.assertRaises(ValueError):
                 replace(settings(), **values).validate_resources()
+
+    def test_call_budget_extends_in_tranches_and_stops_at_ceiling(self):
+        extended = []
+        budget = RequestBudget(20, Mock(), tranche=8, extend=extended.append)
+        for _ in range(20):
+            budget.consume()
+        self.assertEqual(extended, [8, 4])
+        self.assertEqual((budget.reserved, budget.used), (20, 20))
+        with self.assertRaises(CallBudgetExceeded):
+            budget.consume()
+        self.assertTrue(budget.exhausted)
+
+    def test_refused_tranche_extension_never_reaches_provider(self):
+        provider = Mock()
+        provider.invoke.return_value = AIMessage("ok")
+        model = BudgetedModel(provider, settings(), "supervisor")
+        def refuse(count):
+            raise CallBudgetExceeded("daily_call_quota_exceeded")
+        budget = RequestBudget(20, Mock(), tranche=1, extend=refuse)
+        token = _current_budget.set(budget)
+        try:
+            model.invoke([HumanMessage("one")])
+            with self.assertRaises(CallBudgetExceeded):
+                model.invoke([HumanMessage("two")])
+        finally:
+            _current_budget.reset(token)
+        self.assertEqual(provider.invoke.call_count, 1)
+
+    def test_request_deadline_blocks_provider_call(self):
+        provider = Mock()
+        model = BudgetedModel(provider, settings(), "supervisor")
+        budget = RequestBudget(5, Mock(), deadline=time.monotonic() - 1)
+        token = _current_budget.set(budget)
+        try:
+            with self.assertRaises(RunDeadlineExceeded):
+                model.invoke([HumanMessage("late")])
+        finally:
+            _current_budget.reset(token)
+        self.assertEqual(provider.invoke.call_count, 0)
+        self.assertTrue(budget.exhausted)
 
     def test_failure_and_bound_tools_each_consume_before_provider_call(self):
         provider = Mock()

@@ -424,7 +424,7 @@ class HybridTests(unittest.TestCase):
 
     def test_facts_and_sources_cannot_be_replaced_by_model_arguments(self):
         data = self.run_query(proposals=[tool_response("PolicyAnswer", {
-            **answer(), "company_id": "another-company"})])
+            **answer(), })])
         self.assertNotEqual(data["rag"]["status"], "answered")
 
     def test_multiple_tool_calls_rejected(self):
@@ -743,7 +743,7 @@ class ChunkBoundaryTests(unittest.TestCase):
             for text in paragraphs:
                 doc.add_paragraph(text)
             doc.save(path)
-            return parse_docx(path, company_id="test", policy_key="travel", version="new",
+            return parse_docx(path, policy_key="travel", version="new",
                               effective_from=date(2026, 9, 14), chunk_size=200)
 
     def test_sentence_boundaries_preserve_all_characters(self):

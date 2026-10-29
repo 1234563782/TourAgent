@@ -69,7 +69,13 @@ intent_change_evidence; a change of facts or a request to read a result does not
 Do not accept a new task used to launder an old subject or a quoted/negated action.
 Check all requested independent goals and actual depends_on prerequisites; neither omit a goal
 nor invent a dependency. Reading an already saved result is not evidence of new actual expense.
-Other may faithfully delegate conversation, memory and result reading without changing slots.
+Other may faithfully delegate conversation and result reading without changing slots.
+For ordinary conversation, new_task/other is reply delegation, not a new business operation.
+Acknowledgments or declining additional checks support this delegation when the question preserves
+the full meaning. Do not reject it solely because the user requests no new business task.
+This does not authorize cancellation, recovery, saving or rerunning existing tasks.
+Still reject invented business actions, omitted explicit goals, or unsupported controls or facts;
+an acknowledgment does not erase an additional business request in the same message.
 
 For trip fields check query_scope against requested hotel/transport components, journey direction,
 dates and explicitly supplied party, grade, approval and per-room facts. Do not infer a room allocation.

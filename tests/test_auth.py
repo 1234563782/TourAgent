@@ -14,7 +14,7 @@ from business_travel.web import create_app
 
 def settings():
     return Settings("", "", "", "", "", Path("unused"), Path("unused"),
-                    memory_database_url="postgresql://unused", memory_company_id="company")
+                    memory_database_url="postgresql://unused")
 
 
 class AuthUnitTests(unittest.TestCase):
@@ -124,7 +124,7 @@ class AuthUnitTests(unittest.TestCase):
         self.assertIn("Max-Age=0", response.headers["set-cookie"])
 
     def test_memory_only_uses_verified_identity(self):
-        self.store.current_user.return_value = {"company_id": "company", "user_id": "verified", "username": "alice"}
+        self.store.current_user.return_value = {"user_id": "verified", "username": "alice"}
         with patch("business_travel.web.PostgresTravelMemory") as memory:
             memory.return_value.read.return_value = {"trip_history": []}
             response = self.client.get("/api/memory")

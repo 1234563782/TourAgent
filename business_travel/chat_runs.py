@@ -15,7 +15,6 @@ def setup_chat_runs(settings):
     with memory_connection(settings) as connection, connection.transaction():
         connection.execute("""
             CREATE TABLE IF NOT EXISTS chat_runs (
-                company_id TEXT NOT NULL,
                 user_id TEXT NOT NULL,
                 conversation_id TEXT NOT NULL,
                 id TEXT NOT NULL,
@@ -27,24 +26,23 @@ def setup_chat_runs(settings):
                 checkpoint_id TEXT,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                PRIMARY KEY (company_id,user_id,conversation_id,id),
-                FOREIGN KEY (company_id,user_id,conversation_id)
-                    REFERENCES conversations(company_id,user_id,id),
+                PRIMARY KEY (user_id,conversation_id,id),
+                FOREIGN KEY (user_id,conversation_id)
+                    REFERENCES conversations(user_id,id),
                 CHECK (status NOT IN ('completed','awaiting_confirmation')
                     OR checkpoint_id IS NOT NULL)
             )
         """)
         connection.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS chat_runs_one_running
-            ON chat_runs(company_id,user_id,conversation_id) WHERE status='running'
+            ON chat_runs(user_id,conversation_id) WHERE status='running'
         """)
         connection.execute("""
             CREATE INDEX IF NOT EXISTS chat_runs_recent
-            ON chat_runs(company_id,user_id,conversation_id,created_at DESC,id DESC)
+            ON chat_runs(user_id,conversation_id,created_at DESC,id DESC)
         """)
         connection.execute("""
             CREATE TABLE IF NOT EXISTS chat_recoveries (
-                company_id TEXT NOT NULL,
                 user_id TEXT NOT NULL,
                 conversation_id TEXT NOT NULL,
                 run_id TEXT NOT NULL,
@@ -53,18 +51,21 @@ def setup_chat_runs(settings):
                 target_conversation_id TEXT NOT NULL,
                 target_checkpoint_id TEXT NOT NULL,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                PRIMARY KEY (company_id,user_id,conversation_id,run_id),
-                UNIQUE (company_id,user_id,target_conversation_id),
-                FOREIGN KEY (company_id,user_id,conversation_id,run_id)
-                    REFERENCES chat_runs(company_id,user_id,conversation_id,id),
-                FOREIGN KEY (company_id,user_id,target_conversation_id)
-                    REFERENCES conversations(company_id,user_id,id)
+                PRIMARY KEY (user_id,conversation_id,run_id),
+                UNIQUE (user_id,target_conversation_id),
+                FOREIGN KEY (user_id,conversation_id,run_id)
+                    REFERENCES chat_runs(user_id,conversation_id,id),
+                FOREIGN KEY (user_id,target_conversation_id)
+                    REFERENCES conversations(user_id,id)
             )
         """)
 
 
 def request_digest(body):
     action = body.model_dump(exclude={"request_id"}, exclude_none=True)
+    # Keep request IDs created before attachments existed replay-compatible.
+    if not action.get("attachment_ids"):
+        action.pop("attachment_ids", None)
     return sha256(json.dumps(action, sort_keys=True, ensure_ascii=False,
                              separators=(",", ":")).encode("utf-8")).hexdigest()
 
@@ -81,38 +82,32 @@ def public_run(row):
 
 class ChatRunStore:
     def __init__(self, settings, identity, conversation_id):
-        if identity.company_id != settings.memory_company_id:
-            raise PermissionError("Company mismatch")
         self.settings = settings
-        self.scope = (identity.company_id, identity.user_id, conversation_id)
+        self.scope = (identity.user_id, conversation_id)
 
     def get(self, request_id):
         with memory_connection(self.settings) as connection:
             return connection.execute(
-                "SELECT * FROM chat_runs WHERE company_id=%s AND user_id=%s "
-                "AND conversation_id=%s AND id=%s", (*self.scope, request_id)).fetchone()
+                'SELECT * FROM chat_runs WHERE user_id=%s AND conversation_id=%s AND id=%s', (*self.scope, request_id)).fetchone()
 
     def latest(self):
         with memory_connection(self.settings) as connection:
             return connection.execute(
-                "SELECT * FROM chat_runs WHERE company_id=%s AND user_id=%s "
-                "AND conversation_id=%s ORDER BY created_at DESC,id DESC LIMIT 1",
+                'SELECT * FROM chat_runs WHERE user_id=%s AND conversation_id=%s ORDER BY created_at DESC,id DESC LIMIT 1',
                 self.scope).fetchone()
 
     def interrupt_orphans(self):
         """Caller MUST own the conversation advisory lock, not just observe a timeout."""
         with memory_connection(self.settings) as connection:
             connection.execute(
-                "UPDATE chat_runs SET status='interrupted',updated_at=now() "
-                "WHERE company_id=%s AND user_id=%s AND conversation_id=%s AND status='running'",
+                "UPDATE chat_runs SET status='interrupted',updated_at=now() WHERE user_id=%s AND conversation_id=%s AND status='running'",
                 self.scope)
 
     def start(self, request_id, digest, base_checkpoint_id):
         # The conversation lock serializes get/start; the PK is a second guard.
         with memory_connection(self.settings) as connection:
             return connection.execute(
-                "INSERT INTO chat_runs(company_id,user_id,conversation_id,id,request_hash,"
-                "status,base_checkpoint_id) VALUES(%s,%s,%s,%s,%s,'running',%s) RETURNING *",
+                "INSERT INTO chat_runs(user_id,conversation_id,id,request_hash,status,base_checkpoint_id) VALUES(%s,%s,%s,%s,'running',%s) RETURNING *",
                 (*self.scope, request_id, digest, base_checkpoint_id)).fetchone()
 
     def progress(self, request_id, stage):
@@ -120,9 +115,7 @@ class ChatRunStore:
             return
         with memory_connection(self.settings) as connection:
             connection.execute(
-                "UPDATE chat_runs SET stage=%s,updated_at=now() "
-                "WHERE company_id=%s AND user_id=%s AND conversation_id=%s "
-                "AND id=%s AND status='running'",
+                "UPDATE chat_runs SET stage=%s,updated_at=now() WHERE user_id=%s AND conversation_id=%s AND id=%s AND status='running'",
                 (stage, *self.scope, request_id))
 
     def finish(self, request_id, status, checkpoint_id=None):
@@ -132,9 +125,7 @@ class ChatRunStore:
             raise ValueError("A completed run requires a checkpoint")
         with memory_connection(self.settings) as connection:
             row = connection.execute(
-                "UPDATE chat_runs SET status=%s,checkpoint_id=%s,updated_at=now() "
-                "WHERE company_id=%s AND user_id=%s AND conversation_id=%s "
-                "AND id=%s AND status='running' RETURNING *",
+                "UPDATE chat_runs SET status=%s,checkpoint_id=%s,updated_at=now() WHERE user_id=%s AND conversation_id=%s AND id=%s AND status='running' RETURNING *",
                 (status, checkpoint_id, *self.scope, request_id)).fetchone()
         if row is None:
             raise RuntimeError("Run no longer owns an active execution")

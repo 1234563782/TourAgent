@@ -27,7 +27,7 @@ MANIFEST = ROOT / "policies/hfut-2026/manifest.json"
 class UniversityPolicyTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.bundle = prepare_package(MANIFEST, company_id="test_school")
+        cls.bundle = prepare_package(MANIFEST)
         cls.rows = [LodgingRow.model_validate(r) for r in cls.bundle.lodging_rows]
         cls.rules = UniversityRules.model_validate(cls.bundle.rules)
 
@@ -51,7 +51,7 @@ class UniversityPolicyTests(unittest.TestCase):
         self.assertEqual(len(self.bundle.sources), 2)
         self.assertEqual(self.bundle.effective_to, date(2026, 12, 31))
         self.assertEqual({r.sheet for r in self.rows}, {"Sheet1"})
-        self.assertEqual(self.bundle.digest(), prepare_package(MANIFEST, company_id="test_school").digest())
+        self.assertEqual(self.bundle.digest(), prepare_package(MANIFEST).digest())
         for source in self.bundle.sources:
             self.assertEqual(source.sha256, hashlib.sha256((MANIFEST.parent / source.source).read_bytes()).hexdigest())
 
@@ -77,7 +77,7 @@ class UniversityPolicyTests(unittest.TestCase):
             doc = Document()
             doc.add_paragraph("第一条 范围。\n第二条 条件。\n第三条 限制。")
             doc.save(path)
-            bundle = parse_docx(path, company_id="test", policy_key="test",
+            bundle = parse_docx(path, policy_key="test",
                                 version="test", effective_from=date(2026, 1, 1))
         self.assertEqual([c.clause for c in bundle.chunks], ["第一条", "第二条", "第三条"])
         self.assertEqual("".join(c.text for c in bundle.chunks), "第一条 范围。第二条 条件。第三条 限制。")
@@ -100,7 +100,7 @@ class UniversityPolicyTests(unittest.TestCase):
                 PolicyBundle.model_validate(changed)
 
     def test_legacy_bundle_hash_is_unchanged(self):
-        value = dict(schema_version=1, company_id="test", policy_key="old", version="1",
+        value = dict(schema_version=1, policy_key="old", version="1",
                      effective_from="2026-01-01", source="old.docx", source_sha256="a" * 64,
                      chunks=[dict(id="one", section="s", text="text")])
         bundle = PolicyBundle.model_validate(value)

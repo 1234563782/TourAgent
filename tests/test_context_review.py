@@ -245,6 +245,60 @@ class MultiTaskGraphTests(unittest.TestCase):
         self.assertIn("137", result["messages"][-1].content)
         self.assertIn("您好", result["messages"][-1].content)
 
+    def test_thanks_after_check_preserves_business_state_without_repeating_check(self):
+        from dataclasses import replace
+        from business_travel.pending_turns import business_revision
+
+        self.settings = replace(self.settings, slot_kind_discovery=False)
+        text = "谢谢，这轮不附文件，不需要新增核对任务。"
+        graph = self.make_graph([
+            call("SlotSubmission", {"tasks": [self.expense(137, "天津", "核对天津住宿")]}, "s"),
+            call("SlotSubmission", {"tasks": [{"intent": "other", "question": text}]}, "thanks"),
+        ], [AIMessage(content="不客气，这轮不新增核对。")])
+        first = graph.invoke({"messages": [HumanMessage(content="2099-12-03天津137元住宿")]}, self.config)
+        before_slots = deepcopy(first["slots"])
+        before_tasks = deepcopy(first["tasks"])
+        before_memory = deepcopy(self.memory.read())
+        second = graph.invoke({"messages": [HumanMessage(content=text)]}, self.config)
+        self.assertIsNone(second.get("slot_error"))
+        self.assertEqual(second["messages"][-1].content, "不客气，这轮不新增核对。")
+        self.assertEqual(second["slots"], before_slots)
+        self.assertEqual(business_revision(second["slots"], second["tasks"]),
+                         business_revision(before_slots, before_tasks))
+        for ident, task in before_tasks.items():
+            self.assertEqual(second["tasks"][ident], task)
+        self.assertEqual(len(self.checked), 1)
+        self.assertEqual(self.memory.read(), before_memory)
+        self.assertEqual(second.get("pending_turns", []), [])
+
+    def test_thanks_does_not_swallow_an_explicit_additional_check(self):
+        from dataclasses import replace
+
+        self.settings = replace(self.settings, slot_kind_discovery=False)
+        graph = self.make_graph([call("SlotSubmission", {"tasks": [
+            self.expense(137, "天津", "核对天津住宿")]}, "s")])
+        result = graph.invoke({"messages": [HumanMessage(
+            content="谢谢，另外帮我核对2099-12-03天津137元住宿")]}, self.config)
+        self.assertIsNone(result.get("slot_error"))
+        self.assertEqual(len(self.checked), 1)
+        self.assertIn("137", result["messages"][-1].content)
+
+    def test_thanks_does_not_discard_or_retry_an_uncommitted_failed_turn(self):
+        graph = self.make_graph([
+            call("TurnRoute", {}, "empty") for _ in range(self.settings.slot_max_attempts)
+        ] + [call("SlotSubmission", {"tasks": [
+            {"intent": "other", "question": "谢谢，不需要新增核对任务"}]}, "thanks")],
+            [AIMessage(content="不客气。")])
+        first = graph.invoke({"messages": [HumanMessage(content="一个无法提交的请求")]}, self.config)
+        self.assertIsNotNone(first.get("slot_error"))
+        pending = deepcopy(first["pending_turns"])
+        self.assertEqual(len(pending), 1)
+        second = graph.invoke({"messages": [HumanMessage(content="谢谢，不需要新增核对任务")]}, self.config)
+        self.assertIsNone(second.get("slot_error"))
+        self.assertEqual(second["pending_turns"], pending)
+        self.assertEqual(self.checked, [])
+        self.assertEqual(second["messages"][-1].content, "不客气。")
+
     def test_preference_statement_does_not_write_memory_or_repeat_policy(self):
         tasks = [self.expense(137, "天津", "核对天津住宿"),
                  {"intent": "other", "question": "记住我喜欢安静酒店"}]

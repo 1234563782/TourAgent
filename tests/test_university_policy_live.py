@@ -26,8 +26,7 @@ from test_policy_hybrid import FakeModel, tool_response
 class UniversityPostgresTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.settings = replace(Settings.from_env(), policy_key="hfut_test", policy_company_id="school_test",
-                               embedding_model="synthetic", embedding_dimensions=3)
+        cls.settings = replace(Settings.from_env(), policy_key="hfut_test", embedding_model="synthetic", embedding_dimensions=3)
         if cls.settings.missing_policy_config(embedding=False):
             raise RuntimeError("Policy database is not configured")
         cls.schema = "university_policy_test_" + uuid.uuid4().hex
@@ -46,7 +45,7 @@ class UniversityPostgresTests(unittest.TestCase):
         cls.embedder.embed.side_effect = lambda texts: [[1.0, 0.0, 0.0] for _ in texts]
         cls.store = PostgresPolicyStore(cls.settings, connect=connect, embedder=cls.embedder)
         cls.store.initialize()
-        bundle = prepare_package(MANIFEST, company_id="school_test")
+        bundle = prepare_package(MANIFEST)
         bundle.policy_key = "hfut_test"
         cls.bundle = bundle
         cls.staged = cls.store.stage(bundle)
@@ -172,7 +171,7 @@ class UniversityPostgresTests(unittest.TestCase):
                                  {self.staged["document_id"]})
 
     def test_another_organization_and_policy_cannot_read_package(self):
-        for changes in ({"policy_company_id": "another_school"}, {"policy_key": "company_old"}):
+        for changes in ({"policy_key": "other_policy"},):
             other = PostgresPolicyStore(replace(self.settings, **changes), connect=self.connect,
                                         embedder=self.embedder)
             self.assertEqual(other.check(self.facts())["reason"], "no_published_policy")
@@ -182,21 +181,20 @@ class UniversityPostgresTests(unittest.TestCase):
         with self.store.connection() as conn:
             # Roll back all synthetic versions even if an assertion fails.
             with conn.transaction(force_rollback=True):
-                for version, company, key, status in (
-                    ("new-published", "school_test", "hfut_test", "published"),
-                    ("new-draft", "school_test", "hfut_test", "draft"),
-                    ("other-company", "other_school", "hfut_test", "published"),
-                    ("other-key", "school_test", "other_key", "published"),
+                for version, key, status in (
+                    ("new-published", "hfut_test", "published"),
+                    ("new-draft", "hfut_test", "draft"),
+                    ("other-key", "other_key", "published"),
                 ):
                     row = conn.execute(
                         "INSERT INTO policy_documents "
-                        "(company_id,policy_key,version,effective_from,effective_to,status,source,"
+                        "(policy_key,version,effective_from,effective_to,status,source,"
                         "source_sha256,bundle_sha256,embedding_space,embedding_model,embedding_dimensions,"
                         "tokenizer,published_at) "
-                        "SELECT %s,%s,%s,'2000-01-01','2000-12-31',%s,source,source_sha256,bundle_sha256,"
+                        "SELECT %s,%s,'2000-01-01','2000-12-31',%s,source,source_sha256,bundle_sha256,"
                         "embedding_space,embedding_model,embedding_dimensions,tokenizer,now() "
                         "FROM policy_documents WHERE id=%s RETURNING id",
-                        (company, key, version, status, self.staged["document_id"])).fetchone()
+                        (key, version, status, self.staged["document_id"])).fetchone()
                     if version == "new-published":
                         expected = row["id"]
                 active = self.store._active(conn)

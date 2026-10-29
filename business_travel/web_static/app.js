@@ -16,6 +16,42 @@ let conversationKey = null;
 let conversations = [];
 let nextConversationOffset = null;
 const chatDrafts = new Map();
+const chatAttachments = new Map();
+let attachmentBusy = false;
+let attachmentConfig = null;
+
+function selectedAttachments(id = conversationId) {
+  return chatAttachments.get(id) || [];
+}
+function setAttachmentStatus(text = "") {
+  byId("chat-attachment-status").textContent = text;
+}
+function renderChatAttachments() {
+  const list = byId("chat-attachment-list");
+  list.replaceChildren();
+  selectedAttachments().forEach((attachment, index) => {
+    const row = document.createElement("div");
+    row.className = "chat-attachment";
+    const name = document.createElement("span");
+    const statuses = { parsed: "已解析（尚未用于聊天核对）", unsupported: "暂不支持解析",
+      invalid: "文件解析失败", manual_review: "待人工核实" };
+    name.textContent = attachment.filename + " · " + (statuses[attachment.attachment_status] || "待核实");
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "移除";
+    remove.disabled = chatBusy || attachmentBusy || chatPending || chatNeedsRefresh;
+    remove.addEventListener("click", () => {
+      if (chatBusy || attachmentBusy || chatPending || chatNeedsRefresh) return;
+      const items = selectedAttachments().slice();
+      items.splice(index, 1);
+      chatAttachments.set(conversationId, items);
+      setAttachmentStatus(items.length ? "已关联 " + items.length + " 个附件，发送文字后提交。" : "");
+      renderChatAttachments();
+    });
+    row.append(name, remove);
+    list.append(row);
+  });
+}
 
 function message(id, text = "") {
   byId(id).textContent = text;
@@ -30,6 +66,12 @@ function addChat(role, text) {
   row.scrollIntoView({ block: "nearest" });
   return row;
 }
+function addChatAttachments(row, attachments) {
+  if (!row || !attachments?.length) return;
+  const suffix = document.createElement("small");
+  suffix.textContent = "附件：" + attachments.map((item) => item.filename).join("、");
+  row.append(document.createElement("br"), suffix);
+}
 function nextPaint() {
   return new Promise((resolve) => {
     if (typeof requestAnimationFrame === "function") requestAnimationFrame(resolve);
@@ -37,17 +79,22 @@ function nextPaint() {
   });
 }
 function chatControls() {
-  byId("chat-form").setAttribute("aria-busy", String(chatBusy));
-  byId("chat-submit").disabled = chatBusy || chatPending || chatNeedsRefresh || !conversationId;
-  byId("chat-input").disabled = chatBusy || chatPending || chatNeedsRefresh || !conversationId;
+  const busy = chatBusy || attachmentBusy;
+  byId("chat-form").setAttribute("aria-busy", String(busy));
+  byId("chat-submit").disabled = busy || chatPending || chatNeedsRefresh || !conversationId;
+  byId("chat-input").disabled = busy || chatPending || chatNeedsRefresh || !conversationId;
+  byId("chat-files").disabled = busy || chatPending || chatNeedsRefresh || !conversationId;
+  byId("chat-attachment-list").querySelectorAll("button").forEach((button) => {
+    button.disabled = busy || chatPending || chatNeedsRefresh || !conversationId;
+  });
   byId("chat-yes").disabled = chatBusy || chatNeedsRefresh;
   byId("chat-no").disabled = chatBusy || chatNeedsRefresh;
-  byId("chat-reload").disabled = chatBusy;
-  byId("chat-new").disabled = chatBusy;
+  byId("chat-reload").disabled = busy;
+  byId("chat-new").disabled = busy;
   byId("chat-recover").hidden = !chatRecoverable;
-  byId("chat-recover").disabled = chatBusy || recoveryBusy;
-  byId("conversations-more").disabled = chatBusy;
-  byId("conversation-list").querySelectorAll("button").forEach((button) => { button.disabled = chatBusy; });
+  byId("chat-recover").disabled = busy || recoveryBusy;
+  byId("conversations-more").disabled = busy;
+  byId("conversation-list").querySelectorAll("button").forEach((button) => { button.disabled = busy; });
   byId("chat-status").textContent = chatBusy ? chatProgress || "正在处理…" :
     chatRunText || (chatNeedsRefresh ? "请刷新会话核实执行结果" : "");
 }
@@ -57,12 +104,16 @@ function renderChat(result) {
   chatRunText = runState.text;
   chatRecoverable = ["failed", "interrupted"].includes(result.run?.status);
   byId("chat-messages").replaceChildren();
-  result.messages.forEach((item) => addChat(item.role, item.text));
+  result.messages.forEach((item) => {
+    const row = addChat(item.role, item.text);
+    if (item.role === "user") addChatAttachments(row, item.attachments);
+  });
   chatRevision = result.revision;
   chatPending = Boolean(result.interrupt?.length);
   byId("chat-confirm").hidden = !chatPending;
   byId("chat-details").textContent = chatPending ? JSON.stringify(result.interrupt, null, 2) : "";
   chatControls();
+  renderChatAttachments();
 }
 function rememberConversation(id = conversationId) {
   try { sessionStorage.setItem(conversationKey, id); } catch (_) { /* Storage may be disabled. */ }
@@ -99,7 +150,7 @@ function renderConversations() {
   chatControls();
 }
 async function loadChat(target = null, create = false, more = false) {
-  if (chatBusy) return;
+  if (chatBusy || attachmentBusy) return;
   const current = generation;
   let saved = null;
   try { saved = sessionStorage.getItem(conversationKey); } catch (_) { /* Storage may be disabled. */ }
@@ -110,6 +161,8 @@ async function loadChat(target = null, create = false, more = false) {
     // A failed switch must not leave an old thread available for sending.
     conversationId = null;
     byId("chat-input").value = "";
+    setAttachmentStatus("");
+    renderChatAttachments();
     renderChat({ messages: [], revision: null, interrupt: [] });
   }
   chatBusy = true;
@@ -157,6 +210,7 @@ async function loadChat(target = null, create = false, more = false) {
     conversationId = selected;
     if (result.run?.id === pendingChatRequest(selected) && result.run.status !== "running") {
       chatDrafts.delete(selected);
+      if (["completed", "awaiting_confirmation"].includes(result.run.status)) chatAttachments.delete(selected);
       pendingChatRequest(selected, null);
     }
     if (result.conversation && !conversations.some((item) => item.id === selected)) {
@@ -164,6 +218,7 @@ async function loadChat(target = null, create = false, more = false) {
     }
     rememberConversation();
     byId("chat-input").value = chatDrafts.get(selected) || "";
+    renderChatAttachments();
     renderChat(result);
     renderConversations();
   } catch (error) {
@@ -175,7 +230,7 @@ async function loadChat(target = null, create = false, more = false) {
   }
 }
 async function sendChat(payload) {
-  if (chatBusy || chatNeedsRefresh || !conversationId) return;
+  if (chatBusy || attachmentBusy || chatNeedsRefresh || !conversationId) return;
   const current = generation;
   const selected = conversationId;
   chatBusy = true;
@@ -185,14 +240,19 @@ async function sendChat(payload) {
   let completed = false;
   chatControls();
   message("chat-error");
+  const attachments = payload.resume !== undefined ? [] : selectedAttachments(selected);
+  const requestPayload = payload.resume !== undefined
+    ? { ...payload, attachment_ids: [] }
+    : { ...payload, attachment_ids: attachments.map((item) => item.attachment_id) };
   const userRow = payload.message ? addChat("user", payload.message) : null;
+  addChatAttachments(userRow, attachments);
   const streamingRow = addChat("assistant", "");
   let streamingText = "";
   streamingRow.setAttribute("aria-label", "尚未确认完成的回答");
   try {
     const result = await api(`/api/conversations/${encodeURIComponent(selected)}/chat/stream`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...payload, request_id: requestId }),
+       body: JSON.stringify({ ...requestPayload, request_id: requestId }),
     }, async (kind, data) => {
       if (current !== generation || selected !== conversationId) return;
       if (data.run_id !== requestId) throw new Error("Run mismatch");
@@ -217,6 +277,10 @@ async function sendChat(payload) {
     renderChat(result);
     byId("chat-input").value = "";
     chatDrafts.delete(selected);
+    chatAttachments.delete(selected);
+    setAttachmentStatus("");
+    byId("chat-files").value = "";
+    renderChatAttachments();
     const list = await api("/api/conversations");
     if (current !== generation) return;
     conversations = list.items;
@@ -246,8 +310,59 @@ byId("chat-form").addEventListener("submit", (event) => {
   event.preventDefault();
   const input = byId("chat-input");
   const text = input.value.trim();
-  if (!text || chatBusy || chatPending) return;
+  if (!text || chatBusy || attachmentBusy || chatPending) return;
   sendChat({ message: text });
+});
+byId("chat-files").addEventListener("change", async (event) => {
+  if (!conversationId || chatBusy || attachmentBusy || chatPending || chatNeedsRefresh) return;
+  const files = [...event.target.files];
+  event.target.value = "";
+  if (!files.length) return;
+  const current = generation;
+  const selected = conversationId;
+  const items = selectedAttachments().slice();
+  attachmentBusy = true;
+  chatControls();
+  renderChatAttachments();
+  setAttachmentStatus("正在上传并解析附件…");
+  try {
+    const config = attachmentConfig || await api("/api/attachments/config");
+    if (current !== generation || selected !== conversationId) return;
+    attachmentConfig = config;
+    if (items.length + files.length > attachmentConfig.max_files) {
+      throw new Error("附件数量超过上限（" + attachmentConfig.max_files + " 个），请分批发送。");
+    }
+    for (const file of files) {
+      if (!file.size || file.size > attachmentConfig.max_file_bytes) {
+        throw new Error("文件为空或超过上限：" + file.name);
+      }
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error("读取文件失败"));
+        reader.readAsDataURL(file);
+      });
+      if (current !== generation || selected !== conversationId) return;
+      const encoded = String(dataUrl).split(",", 2)[1] || "";
+      const result = await api("/api/attachments/inspect", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename: file.name, content_base64: encoded }),
+      });
+      if (current !== generation || selected !== conversationId) return;
+      if (!items.some((item) => item.attachment_id === result.attachment_id)) items.push(result);
+      chatAttachments.set(selected, items.slice());
+      renderChatAttachments();
+    }
+    chatAttachments.set(selected, items);
+    setAttachmentStatus(items.length ? "已关联 " + items.length + " 个附件，发送文字后提交。" : "");
+    renderChatAttachments();
+  } catch (error) {
+    if (current !== generation) return;
+    if (error.status === 401) showLogin("登录已失效，请重新登录");
+    else setAttachmentStatus((error.message || "附件上传失败，请重试") + "；已上传成功的附件仍保留。");
+  } finally {
+    if (current === generation) { attachmentBusy = false; chatControls(); renderChatAttachments(); }
+  }
 });
 byId("chat-yes").addEventListener("click", () => {
   sendChat({ resume: true, revision: chatRevision });
@@ -265,7 +380,7 @@ function recoveryControls() {
   byId("recovery-reviewed").disabled = recoveryBusy;
 }
 async function reviewRecovery() {
-  if (chatBusy || recoveryBusy || !conversationId) return;
+  if (chatBusy || attachmentBusy || recoveryBusy || !conversationId) return;
   const current = generation;
   const selected = conversationId;
   recoveryReview = null;
@@ -353,6 +468,7 @@ async function api(path, options = {}, stream = false) {
   return readChatEvents(response, stream);
 }
 function showLogin(text = "") {
+  window.InvoiceReviewUI?.reset();
   generation++;
   signedIn = false;
   chatBusy = false;
@@ -371,15 +487,21 @@ function showLogin(text = "") {
   conversationKey = null;
   conversations = [];
   chatDrafts.clear();
+  chatAttachments.clear();
+  attachmentBusy = false;
+  attachmentConfig = null;
   nextConversationOffset = null;
   renderConversations();
   byId("chat-messages").replaceChildren();
   byId("chat-input").value = "";
+  byId("chat-files").value = "";
+  setAttachmentStatus("");
+  renderChatAttachments();
   byId("chat-details").textContent = "";
   byId("chat-confirm").hidden = true;
   message("chat-error");
   chatControls();
-  ["account-name", "company", "user-id"].forEach((id) => { byId(id).textContent = ""; });
+  ["account-name", "user-id"].forEach((id) => { byId(id).textContent = ""; });
   byId("workspace").hidden = true;
   byId("login-view").hidden = false;
   byId("boot").hidden = true;
@@ -394,13 +516,13 @@ async function restore() {
     const user = await api("/api/auth/me");
     if (current !== generation) return;
     signedIn = true;
-    conversationKey = `aligo:conversation:${user.company_id}:${user.user_id}`;
+    conversationKey = `aligo:conversation:${user.user_id}`;
     byId("account-name").textContent = user.username;
-    byId("company").textContent = user.company_id;
     byId("user-id").textContent = user.user_id;
     byId("login-view").hidden = true;
     byId("workspace").hidden = false;
     byId("boot").hidden = true;
+    window.InvoiceReviewUI?.activate(api, () => showLogin("登录已失效，请重新登录"));
     await loadChat();
   } catch (error) {
     if (current === generation) showLogin(error.status === 401 ? "" : "服务暂不可用，请稍后重试");

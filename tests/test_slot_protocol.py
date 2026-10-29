@@ -42,6 +42,37 @@ def accepted():
 
 
 class SlotProtocolTests(unittest.TestCase):
+    def test_conversation_delegation_contract_is_explicit_for_route_and_review(self):
+        from business_travel.slot_protocol import ROUTE_PROMPT, NewRequest
+        from business_travel.semantic_review import REVIEW_PROMPT
+
+        for prompt in (ROUTE_PROMPT, REVIEW_PROMPT):
+            self.assertIn("reply delegation, not a new business operation", prompt)
+            self.assertIn("does not authorize cancellation, recovery, saving or rerunning", prompt)
+        self.assertIn("reply delegation", NewRequest.model_fields["intent"].description)
+
+    def test_thanks_delegates_without_business_patch_or_controls(self):
+        subject = {"id": "s", "domain": "expense", "revision": 2,
+                   "intent": "policy_check", "values": {"kind": "hotel", "amount": "500"},
+                   "evidence": {}, "history": []}
+        current = {"expense": subject, "subjects": {"s": subject}}
+        text = "谢谢，这轮不附文件，不需要新增核对任务。"
+        result = self.run_proposal([reply("TurnRoute", {"tasks": [self.new("other", text)]})],
+                                   text=text, current=current)
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["slots"], current)
+        self.assertEqual(result["tasks"], [{"intent": "other", "question": text,
+                                            "subject": None, "depends_on": []}])
+        self.assertEqual(result["task_controls"], [])
+        self.assertEqual(len(self.model.calls), 1)
+        self.assertEqual(len(self.reviewer.calls), 1)
+
+    def test_empty_proposal_still_cannot_skip_review_or_authorize_discard(self):
+        result = self.run_proposal([reply("TurnRoute", {})], text="谢谢，不需要新增核对任务")
+        self.assertEqual(result["status"], "error")
+        self.assertIn("at_least_one_task_or_control_required", str(result))
+        self.assertFalse(self.reviewer.calls)
+
     def run_proposal(self, replies, *, text="南京酒店，2099-09-10入住，2099-09-11退房；费用日期2099-09-10，核验住宿金额319元", current=None,
                      review=None, **options):
         self.model = RawModel(replies)

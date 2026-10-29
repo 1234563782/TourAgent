@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def settings(**changes):
     base = Settings(api_key="", model="", base_url="", node_path="", flyai_cli_path="",
                     storage_dir=Path("."), legacy_memory_dir=Path("."),
-                    policy_backend="pgvector", policy_company_id="test_co", policy_key="travel",
+                    policy_backend="pgvector", policy_key="travel",
                     policy_database_url="postgresql://synthetic-secret",
                     embedding_base_url="https://embedding.example/v1", embedding_api_key="test-secret",
                     embedding_model="test-embedding", embedding_dimensions=3)
@@ -37,7 +37,7 @@ def settings(**changes):
 
 
 def bundle():
-    return PolicyBundle(company_id="test_co", policy_key="travel", version="test",
+    return PolicyBundle(policy_key="travel", version="test",
                         effective_from="2026-09-07", source="synthetic.docx", source_sha256="a" * 64,
                         chunks=[PolicyChunk(id="one", clause="4.2", section="住宿", text="普通员工住宿420元",
                                             related_ids=["two"]),
@@ -46,7 +46,7 @@ def bundle():
 
 def database_doc(**changes):
     return {
-        "id": 1, "company_id": "test_co", "policy_key": "travel", "version": "test",
+        "id": 1, "policy_key": "travel", "version": "test",
         "effective_from": date(2026, 9, 7), "effective_to": None, "source": "synthetic.docx",
         "source_sha256": "a" * 64, "bundle_sha256": bundle().digest(), "status": "draft",
         "embedding_space": "test-space", "tokenizer": "test-tokenizer", **changes,
@@ -92,7 +92,7 @@ class DocumentTests(unittest.TestCase):
         self.path = Path(self.temp.name) / "policy.docx"
 
     def parse(self, **kwargs):
-        return parse_docx(self.path, company_id="test_co", policy_key="travel",
+        return parse_docx(self.path, policy_key="travel",
                           version="test", effective_from=date(2026, 9, 7), **kwargs)
 
     def make_doc(self):
@@ -156,7 +156,7 @@ class DocumentTests(unittest.TestCase):
             {"chunks": [value["chunks"][0], value["chunks"][0]]},
             {"chunks": [value["chunks"][0]]},
             {"effective_to": "2020-01-01"},
-            {"company_id": "../other"},
+            {"policy_key": "../escape"},
         ):
             with self.assertRaises(ValueError):
                 PolicyBundle.model_validate({**value, **update})
@@ -165,7 +165,7 @@ class DocumentTests(unittest.TestCase):
         self.make_doc()
         output = Path(self.temp.name) / "bundle.json"
         args = ["prepare", "--source", str(self.path), "--output", str(output),
-                "--company", "test_co", "--version", "test", "--effective-from", "2026-09-07"]
+                "--version", "test", "--effective-from", "2026-09-07"]
         with patch.object(Settings, "from_env", side_effect=AssertionError("must stay offline")), patch("builtins.print"):
             self.assertEqual(main(args), 0)
             before = output.read_bytes()
@@ -410,7 +410,7 @@ class RepositoryTests(unittest.TestCase):
     def test_scope_mismatch_never_embeds(self):
         store, _, _ = store_with_db([])
         with self.assertRaises(PolicyError):
-            store.stage(bundle().model_copy(update={"company_id": "other_co"}))
+            store.stage(bundle().model_copy(update={}))
         store.embedder.embed.assert_not_called()
 
     def test_idempotent_stage_does_not_embed(self):
@@ -452,7 +452,7 @@ class RepositoryTests(unittest.TestCase):
         result = store.search("住宿';DROP TABLE x;")
         self.assertEqual([row["chunk"] for row in result["sources"]], ["one", "two"])
         active = conn.execute.call_args_list[1]
-        self.assertEqual(active.args[1], ("test_co", "travel"))
+        self.assertEqual(active.args[1], ("travel",))
         self.assertIn("status='published'", active.args[0])
         for call in conn.execute.call_args_list:
             self.assertNotIn("DROP TABLE", call.args[0])
@@ -635,7 +635,7 @@ class RepositoryTests(unittest.TestCase):
         path = ROOT / "artifacts/agent有限公司差旅费报销管理制度_模拟修订版_V1.1.docx"
         if not path.exists():
             self.skipTest("Optional user-owned Word fixture absent")
-        parsed = parse_docx(path, company_id="test_co", policy_key="travel",
+        parsed = parse_docx(path, policy_key="travel",
                             version="test", effective_from=date(2026, 9, 7))
         clauses = {c.clause for c in parsed.chunks}
         rules = ReviewedRules.model_validate_json((ROOT / "policies/demo-v1.1.rules.json").read_text("utf-8"))

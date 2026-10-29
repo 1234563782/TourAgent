@@ -45,7 +45,8 @@ class NewRequest(Request):
 
     operation: Literal["new_task"]
     intent: Literal["policy_check", "policy_explain", "plan_trip", "other"] = Field(description=
-        "other: conversation, weather, fact confirmation, saving the current trip, "
+        "other: reply delegation for conversation (including acknowledgments/thanks), "
+        "weather, fact confirmation, saving the current trip, "
         "or reading/interpreting an already returned result, including unknown compliance. "
         "Cancel, resume, retry and discard are controls or recovery, not other. "
         "plan_trip: search/plan travel. policy_check: a new expense/entitlement check. "
@@ -314,6 +315,11 @@ Cancel, resume, retry and discard are task controls or recovery, never other tas
 Do not create an other task solely to cancel, resume, retry or discard.
 Saving the current trip, confirming facts, and reading or interpreting an already returned result
 still require an other task; do not drop them.
+For ordinary conversation, new_task/other is reply delegation, not a new business operation.
+Acknowledgments or declining additional checks still use other with the full negation preserved.
+This does not authorize cancellation, recovery, saving or rerunning existing tasks.
+Do not emit an empty route merely because no new business goal is requested.
+If the same message also requests a new business goal, route that goal normally.
 A combined request such as searching tickets and saving the itinerary needs both plan_trip and other.
 Use task_context for completed AND pending task goals, conversation for references to questions.
 Follow-up question restates the original objective with updated conditions, not stale missing facts.

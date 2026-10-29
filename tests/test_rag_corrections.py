@@ -89,7 +89,7 @@ class IdentityRetrievalTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.bundle = prepare_package(Path(__file__).resolve().parents[1] /
-                                     "policies/hfut-2026/manifest.json", company_id="audit")
+                                     "policies/hfut-2026/manifest.json")
 
     def make_store(self):
         lodging = next(c for c in self.bundle.chunks if c.id == "lodging-r9")
