@@ -17,9 +17,6 @@ class UniversityRules(Contract):
     transport_classes: dict[str, dict[str, list[str]]]
     category_order: list[str]
     title_categories: dict[str, str]
-    # Ignored compatibility field. Older packages stored a shortcut from transport
-    # category to lodging grade. Those identities are independent and are not applied.
-    lodging_categories: dict[str, str] = Field(default_factory=dict)
     senior_post_max_grade: int = Field(ge=1)
     senior_post_category: str
     student_category: str

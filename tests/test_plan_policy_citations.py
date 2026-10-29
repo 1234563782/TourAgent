@@ -18,7 +18,7 @@ from test_policy_rag import database_doc, store_with_db
 
 
 def recommendation_fixture(scope="combined", *, omit_sources=False, citation_mode="fragments",
-                           trip_changes=None, legacy_rules=False, row_transform=None,
+                           trip_changes=None, row_transform=None,
                            lodging_standard=None):
     bundle = prepare_package(Path(__file__).resolve().parents[1] /
                              "policies/hfut-2026/manifest.json")
@@ -27,8 +27,6 @@ def recommendation_fixture(scope="combined", *, omit_sources=False, citation_mod
              "content": c.text, "table_data": c.table, "related_ids": c.related_ids}
             for c in bundle.chunks if c.clause in clauses or c.id == "lodging-r9"]
     raw_rules = copy.deepcopy(bundle.rules)
-    if legacy_rules:
-        raw_rules.pop("lodging_categories", None)
     if row_transform:
         rows = row_transform(rows)
     changes = dict(trip_changes or {})
@@ -75,7 +73,7 @@ class PlanPolicyCitationTests(unittest.TestCase):
         self.assertIn("Sheet1 / B9:K9", text)
 
     def test_transport_identity_does_not_supply_lodging_grade(self):
-        data, _ = recommendation_fixture(legacy_rules=True)
+        data, _ = recommendation_fixture()
         text = render_draft(data)
         profile = data["recommendation_profile"]
         self.assertEqual(profile["transport_standard"], "一类")
@@ -270,7 +268,7 @@ class PlanPolicyCitationTests(unittest.TestCase):
                 self.assertNotIn("住宿档次", text)
 
     def test_hotel_identity_does_not_invent_lodging_grade(self):
-        data, _ = recommendation_fixture("hotel", legacy_rules=True)
+        data, _ = recommendation_fixture("hotel")
         text = render_draft(data)
         self.assertIsNone(data["recommendation_profile"]["lodging_standard"])
         self.assertIn("住宿档次：待核实", text)

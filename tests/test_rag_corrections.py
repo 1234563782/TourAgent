@@ -113,7 +113,6 @@ class IdentityRetrievalTests(unittest.TestCase):
         self.assertNotIn("cap", result["lodging_lookup"])
         self.assertEqual(facts, original)
         mapping = next(s for s in result["sources"] if s.get("source_type") == "reviewed_rule")
-        self.assertNotIn("lodging_categories", mapping["text"])
         self.assertNotIn("部级", mapping["text"])
 
     def test_resolved_grade_reaches_writer_and_reviewer_with_unchanged_facts(self):
