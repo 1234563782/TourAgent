@@ -51,14 +51,53 @@
 
 ## Jev 意图准确率评测
 
-`intent_accuracy_cases_100.jsonl` 是当前的100条人工标注意图测试集，覆盖四类意图、单意图、多意图、否定、假设、政策解释、费用核验以及保存/确认/修改/取消出差等 `other` 操作。原来的20条小样本保留在 `intent_accuracy_cases.jsonl`，可用于前后版本快速对比。
+活跃集是 `intent_accuracy_cases.jsonl`（94 条人工标注），覆盖四类意图、单意图、多意图、否定、假设、政策解释、费用核验，以及**取消 / 重试 / 丢弃 / 修改条件**这四类"不产生新意图"的控制回合。
 
-脚本默认使用100条数据：
+三个数据集文件的分工：
+
+| 文件 | 内容 |
+| :--- | :--- |
+| `intent_accuracy_cases.jsonl` | 活跃集，94 条，脚本默认使用 |
+| `intent_accuracy_cases_retired.jsonl` | 6 条长期偏好记忆案例，能力已下线，仅供将来恢复时回归 |
+| `archive/intent_accuracy_cases_100_v1.jsonl` | 改动前原始 100 条的冻结快照 |
+| `archive/intent_accuracy_cases_20.jsonl` | 早期 20 条小样本 |
+
+### 为什么移出 6 条记忆案例
+
+长期偏好存储已经退役——`business_travel/memory_pg.py:54-55` 会 `DROP TABLE IF EXISTS user_preferences` 且不再重建。这 6 条（064/065/075/086/088/092）只能考核意图分类，不能声称端到端支持，因此移入 retired 文件并保留原标签，待能力恢复时可原样复跑。
+
+注意 `079 查看我刚才保存的行程` **不属于**此类：它读的是 `trips` 表（`save_trip` 写入的行程档案），该能力仍在用，所以留在活跃集。
+
+### 控制类回合为什么期望为空意图
+
+取消、恢复、重试、丢弃走 `ControlRequest` / `RecoveryRequest`，修改条件走 `UpdateRequest`，三者在 `slot_protocol.py` 里都**不带 intent 字段**；`NewRequest.intent` 的字段说明也写明 *"Cancel, resume, retry and discard are controls or recovery, not other."*。这类回合同样不能标成 `other` —— 那会让系统新建一个任务，而真正的取消永远不会发生。
+
+所以 068/069/070/073/078 的 `expected_intents` 是 `[]`，同时补上了它们作用的 `pending_tasks` / `pending_turns` / `task_context`，否则这些用例既没有可取消的目标，也测不到控制路径。`--validate-only` 会把这条契约当作断言来检查：
 
 ```powershell
-.\.venv\Scripts\python.exe evals\intent_accuracy.py `
-  --output .verification\intent-accuracy-100.json
+.\.venv\Scripts\python.exe evals\intent_accuracy.py --validate-only
 ```
+
+它会校验：控制/恢复/更新类用例必须期望空意图；空意图用例必须带上它作用的目标状态；活跃集里不得出现 `memory` 类已下线能力；`case_id` 不重复。
+
+### 两个指标口径
+
+```powershell
+# ① JEV 单点（严格下界）：undecided 记为"没有"
+.\.venv\Scripts\python.exe evals\intent_accuracy.py `
+  --output .verification\intent-accuracy-94.json
+
+# ② 系统口径（产品真实判断）：undecided 交给 TurnRoute 复判
+.\.venv\Scripts\python.exe evals\intent_route_accuracy.py `
+  --output .verification\intent-route-94.json
+```
+
+Jev 的每个意图问题返回三态：概率 ≥ `JEV_INTENT_THRESHOLD`（默认 0.8）为 yes，≤ `1 - threshold`（默认 0.2）为 no，**落在 0.2~0.8 之间为 undecided**。这些 undecided 目标会随 `jev_hint` 传给 TurnRoute 大模型，由它按当前语句重新判定，所以：
+
+- `intent_accuracy.py` 的 `exact_match_accuracy` 是**严格下界**（undecided 当没有算），同时单独输出 `decided_exact_match_accuracy`（只统计四类都给出 yes/no 的用例）；
+- `intent_route_accuracy.py` 的 `route_accuracy` 才是**产品级指标**，并额外输出 `jev_only_accuracy`、`delegated_cases`、`undecided_resolve_rate`、`rescued_cases`、`regressed_cases`，用来回答"把不确定的交给大模型到底救回几条、有没有改坏原本对的"。
+
+Jev 模型版本必须钉死（`.env` 的 `JEV_MODEL`）。用浮动的 `jev-latest` 时，服务端从 1.13.0 升到 1.14.0 会让两次结果无法比较。
 
 先跑少量样本确认接口和 Key：
 
