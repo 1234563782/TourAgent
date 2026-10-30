@@ -118,3 +118,26 @@
 - 方案 1：问题真实；规则方向可采纳，但不能原样加入四条宽泛规则，也不能未经授权删除已跟踪文件。
 - 方案 2：问题部分真实、描述过度；应先补齐用户偏好契约和 provider 前的确定性过滤，不能只依赖 compact 保留字段或模型判断。
 - 方案 3：产品缺口真实；建议先定义按 user/task/revision 授权的 JSON/Markdown 导出契约，再评估 PDF 和学校模板适配。
+
+## 2026-10-29 用户出行偏好画像方案复核
+
+- 身份与偏好分离、偏好只在同一合规层内做软排序的原则正确；但当前项目已退休长期偏好能力，memory_pg.py 不创建替代偏好表，graph.py 明确不支持长期偏好，tests/test_preference_autosave.py 将其作为回归契约。新增 user_travel_profiles、偏好 API 和画像读取会直接冲突。
+- save_trip 是保存当前草稿的用户确认，不等于确认酒店品牌、座位或早餐为长期偏好；selected 可能含模型补选、fallback、未知库存和未核验报价，不能直接统计成习惯。
+- 方案缺少版本、来源、置信度、撤销/清除、过期、审计和并发更新条件；Redis 降级还需要缓存键、TTL、失效和 PG 不可用语义。
+- 当前 QueryRequest 没有长期偏好字段；应使用独立只读 preference snapshot，避免混淆本次硬约束与长期软偏好。tuniu 的 brandName/starName/meal 不能分别直接当作品牌、星级和早餐布尔值；现有 Candidate 也没有靠窗/过道座位信息。
+- normalize_tuniu 会先按 provider limit 截断，planner 再截断；仅在 planner 排序无法保证偏好酒店进入候选池。偏好命中应在 provider 结果截断前扩大召回或做明确保底扫描。
+- custom_notes 不应直接进入 Prompt；接口必须绑定已认证 user_id，禁止客户端指定目标用户，并提供白名单、限长、审计和清除操作。
+- 建议先做显式偏好最小闭环，暂缓历史自动画像；在当前项目边界下，本方案判定为方向可取、直接改造不可接受。
+
+## 2026-10-29 纯 PostgreSQL 用户偏好画像方案复核
+
+- 去掉 Redis、使用现有 memory_pg.py 的同一 PostgreSQL schema、把偏好限制为合规层内软排序，这些方向比前版合理；但新增表仍会重新启用当前已退休的长期偏好能力，必须先改变产品边界、测试契约和迁移策略。
+- setup_memory() 当前会显式删除 user_preferences 且不创建偏好表；若改为 user_travel_profiles，不能只追加 CREATE TABLE，还要更新单学校迁移的表清单、初始化测试、回滚/清除语义和现有无偏好 API回归测试。
+- UserPreferenceProfile 不应让客户端提供 user_id；服务层应使用已认证 MemoryIdentity 绑定用户。JSONB 需要 schema_version、字段白名单、版本/并发更新条件、来源、置信度和清除操作，不能只用 user_id/preferences/updated_at。
+- _preference_match_score(item, pref) 的 profile 参数与现有 planning.py 的 policy recommendation_profile 概念不同；应使用独立 preference snapshot，不能把长期偏好塞进 QueryRequest 或政策 profile。
+- 方案的排序代码只查 item.label 和不存在的 has_breakfast，未使用 star_min；当前 Tuniu 字段是 brandName、starName、meal，必须先做结构化字段读取、品牌别名规范化、星级解析和早餐的含早/不含早/未知状态。当前 Candidate 没有靠窗/过道座位信息，train_seat_position 不能宣称已实现。
+- normalize_tuniu() 已按 provider limit 截断，planning.py 再按 max_candidates 截断；只在 planner 的 _select_top_hotel_candidates 内加偏好分，可能在偏好排序前丢掉目标品牌。需要扩大 provider 召回或在 provider 截断前做偏好保底扫描。
+- 同一合规桶内按偏好、价格、房态排序与现有 _candidate_sort_key 的实际 tuple 不一致；当前 key 仍会把 availability 放在价格前，应明确 tie-break 目标并固定测试。
+- avoid_red_eye 默认 True 会在用户没有设置时产生隐含偏好；长期画像应使用显式/未知状态，不能用默认值替用户做偏好选择。time_window、航班/列车时段、跨午夜和时区也需定义。
+- save_trip 后异步统计没有现成可靠作业契约。若保留历史沉淀，需要幂等事件、失败重试、版本更新、显式偏好优先级、样本去重，并只统计用户确认保存且最终采用的候选，排除 fallback、alternatives、sold_out、unknown inventory 和证据缺失记录。频次 >=3/5 还需要置信度与撤销规则。
+- 建议分阶段：先实现显式偏好 PG CRUD 和 preference snapshot 注入；再在已截断前解决偏好候选召回；最后才做历史统计。custom_notes 首版应删除或改为白名单结构化标签，不要直接进 Prompt。

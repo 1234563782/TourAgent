@@ -1,0 +1,770 @@
+[
+  {
+    "id": "CASE-01",
+    "question": "合肥工业大学院士出差，去北京可以乘坐高铁什么席位？",
+    "ground_truth": "院士属于第一类人员，乘坐火车（含高铁、动车）可以乘坐火车软席（软座、软卧），高铁/动车商务座，全列软席列车一等软座。",
+    "target_clauses": [
+      "第六条"
+    ],
+    "policy_query": {
+      "category": "transport",
+      "mode": "general"
+    },
+    "facts": {
+      "kind": "transport"
+    },
+    "expected_statuses": [
+      "answered"
+    ],
+    "required_points": [
+      "院士属于一类人员，高铁/动车最高标准为商务座。"
+    ],
+    "policy": {
+      "policy_key": "hfut_travel",
+      "version": "2026-project-v1"
+    }
+  },
+  {
+    "id": "CASE-02",
+    "question": "在不涉及符合规定的随行或特殊批准情形下，正高级职称教授出差去上海，能坐飞机头等舱吗？",
+    "ground_truth": "不能。正高级职称人员属于第二类人员，正常情况下乘坐飞机只能乘坐经济舱，二类标准不包含头等舱或公务舱。",
+    "target_clauses": [
+      "第六条"
+    ],
+    "policy_query": {
+      "category": "transport",
+      "mode": "general"
+    },
+    "facts": {
+      "kind": "transport"
+    },
+    "expected_statuses": [
+      "answered"
+    ],
+    "required_points": [
+      "题设无随行或特殊批准，按正高级二类标准执行。",
+      "飞机为经济舱，不包含头等舱、公务舱。"
+    ],
+    "policy": {
+      "policy_key": "hfut_travel",
+      "version": "2026-project-v1"
+    }
+  },
+  {
+    "id": "CASE-03",
+    "question": "普通行政人员出差，乘坐夕发朝至的全列软席火车，可以买普通软席（如软卧）吗？",
+    "ground_truth": "可以。根据规定，对于乘坐夕发朝至的全列软席火车，乘坐普通软席时，不受出差人员级别限制。",
+    "target_clauses": [
+      "第六条"
+    ],
+    "policy_query": {
+      "category": "transport",
+      "mode": "general"
+    },
+    "facts": {
+      "kind": "transport"
+    },
+    "expected_statuses": [
+      "answered"
+    ],
+    "required_points": [
+      "夕发朝至的全列软席火车，普通软席不受人员级别限制。"
+    ],
+    "policy": {
+      "policy_key": "hfut_travel",
+      "version": "2026-project-v1"
+    }
+  },
+  {
+    "id": "CASE-03-CONTRAST",
+    "question": "普通行政人员出差，如果乘坐普通非全列软席的普通普速列车，仅因为是夜间夕发朝至，可以超级别买软卧吗？",
+    "ground_truth": "不可以。第六条第（三）项明确限定为“夕发朝至的全列软席火车”，普通非全列软席列车普通人员仍须执行第三类标准（硬席：硬座和硬卧）。",
+    "target_clauses": [
+      "第六条"
+    ],
+    "policy_query": {
+      "category": "transport",
+      "mode": "general"
+    },
+    "facts": {
+      "kind": "transport"
+    },
+    "expected_statuses": [
+      "answered"
+    ],
+    "required_points": [
+      "不能仅因夕发朝至就适用全列软席例外。",
+      "题设普通人员按三类硬座/硬卧标准，不得仅据夜间行车升级软卧。"
+    ],
+    "policy": {
+      "policy_key": "hfut_travel",
+      "version": "2026-project-v1"
+    }
+  },
+  {
+    "id": "CASE-04",
+    "question": "符合第一类标准的人员出差，如果确因工作需要随行两人，两人都可以乘坐同等级交通工具吗？",
+    "ground_truth": "不可以。第六条第（一）项明确规定“确因工作需要，随行一人可乘坐同等级交通工具(国际行程除外)”，政策优惠仅限随行一人；第二人不能仅凭随行身份享受一类待遇，应按其本人职务（职称）适用的标准执行。",
+    "target_clauses": [
+      "第六条"
+    ],
+    "policy_query": {
+      "category": "transport",
+      "mode": "general"
+    },
+    "facts": {
+      "kind": "transport"
+    },
+    "expected_statuses": [
+      "answered"
+    ],
+    "required_points": [
+      "随行同等级待遇限定确因工作需要的一人，且不含国际行程。",
+      "第二人不能仅凭随行身份升级，应按本人适用标准。"
+    ],
+    "policy": {
+      "policy_key": "hfut_travel",
+      "version": "2026-project-v1"
+    }
+  },
+  {
+    "id": "CASE-05",
+    "question": "出差去拉萨（西藏），每天的伙食补助费是多少钱？",
+    "ground_truth": "西藏发放标准为120元/人/天。（注：西藏、青海、新疆发放标准为120元/人/天，其余地区均为100元/人/天）。",
+    "target_clauses": [
+      "第十七条"
+    ],
+    "policy_query": {
+      "category": "meal",
+      "mode": "general"
+    },
+    "facts": {
+      "kind": "meal"
+    },
+    "expected_statuses": [
+      "answered"
+    ],
+    "required_points": [
+      "西藏伙食补助日标准为120元/人/天。"
+    ],
+    "policy": {
+      "policy_key": "hfut_travel",
+      "version": "2026-project-v1"
+    }
+  },
+  {
+    "id": "CASE-06",
+    "question": "出差去北京3天，伙食补助费按什么天数计算，每天多少？",
+    "ground_truth": "伙食补助费按出差自然（日历）天数计算包干使用，北京发放标准为每人每天100元。",
+    "target_clauses": [
+      "第十七条"
+    ],
+    "policy_query": {
+      "category": "meal",
+      "mode": "general"
+    },
+    "facts": {
+      "kind": "meal"
+    },
+    "expected_statuses": [
+      "answered"
+    ],
+    "required_points": [
+      "按自然（日历）天数计算。",
+      "北京伙食日标准100元/人/天。"
+    ],
+    "policy": {
+      "policy_key": "hfut_travel",
+      "version": "2026-project-v1"
+    }
+  },
+  {
+    "id": "CASE-07",
+    "question": "出差期间市内交通费的包干发放标准是多少？",
+    "ground_truth": "市内交通费包干标准按出差自然（日历）天数计算，每人每天80元。",
+    "target_clauses": [
+      "第二十条"
+    ],
+    "policy_query": {
+      "category": "local_transport",
+      "mode": "general"
+    },
+    "facts": {
+      "kind": "local_transport"
+    },
+    "expected_statuses": [
+      "answered"
+    ],
+    "required_points": [
+      "市内交通包干按自然（日历）天数，每人每天80元。"
+    ],
+    "policy": {
+      "policy_key": "hfut_travel",
+      "version": "2026-project-v1"
+    }
+  },
+  {
+    "id": "CASE-08",
+    "question": "参加会议由主办方统一承担伙食费，在出差期间伙食补助怎么发放？",
+    "ground_truth": "会议期间由举办方承担伙食费用的，不发放会议期间的伙食补助费；只发放出差人员在途期间的伙食补助费。",
+    "target_clauses": [
+      "第十八条",
+      "第二十五条"
+    ],
+    "policy_query": {
+      "category": "meal",
+      "mode": "general"
+    },
+    "facts": {
+      "kind": "meal"
+    },
+    "expected_statuses": [
+      "answered"
+    ],
+    "required_points": [
+      "举办方承担伙食费用的会议期间不发伙食补助。",
+      "在途期间按规定发放伙食补助。"
+    ],
+    "policy": {
+      "policy_key": "hfut_travel",
+      "version": "2026-project-v1"
+    }
+  },
+  {
+    "id": "CASE-09",
+    "question": "出差结束后多长时间内必须办理差旅报销？",
+    "ground_truth": "工作人员出差结束后，应在两个月内办理报销手续。出差期间所发生的一切费用必须连同差旅费同时报销，事后不得补报。",
+    "target_clauses": [
+      "第二十二条"
+    ],
+    "policy_query": {
+      "category": "other",
+      "mode": "general"
+    },
+    "facts": {},
+    "expected_statuses": [
+      "answered"
+    ],
+    "required_points": [
+      "出差结束后两个月内办理报销。"
+    ],
+    "policy": {
+      "policy_key": "hfut_travel",
+      "version": "2026-project-v1"
+    }
+  },
+  {
+    "id": "CASE-10",
+    "question": "机票和住宿费可以用现金支付吗？",
+    "ground_truth": "不可以。住宿费、机票支出等按规定必须使用公务卡或银行转账方式结算。因客观原因无法使用公务卡需附情况说明并经单位（项目）负责人审核同意。",
+    "target_clauses": [
+      "第二十三条"
+    ],
+    "policy_query": {
+      "category": "other",
+      "mode": "general"
+    },
+    "facts": {},
+    "expected_statuses": [
+      "answered"
+    ],
+    "required_points": [
+      "机票、住宿费按规定使用公务卡或银行转账。",
+      "客观原因无法使用公务卡，须情况说明并经单位（项目）负责人审核同意。"
+    ],
+    "policy": {
+      "policy_key": "hfut_travel",
+      "version": "2026-project-v1"
+    }
+  },
+  {
+    "id": "CASE-11",
+    "question": "野外考察住在帐篷或农户家没有住宿发票，能报销车票和领补助吗？",
+    "ground_truth": "可以。开展野外调研、地质考察等住在帐篷、农户等不收住宿费或不能取得发票的，出差人员据实写出情况说明并经负责人批准，可按标准据实报销交通费，按规定标准发放伙食补助费和市内交通费。",
+    "target_clauses": [
+      "第二十四条"
+    ],
+    "policy_query": {
+      "category": "other",
+      "mode": "general"
+    },
+    "facts": {},
+    "expected_statuses": [
+      "answered"
+    ],
+    "required_points": [
+      "野外调研等规定工作，帐篷/农户等不收住宿费或无法取得住宿发票，可按规定处理。",
+      "须据实情况说明并经单位（项目）负责人批准。",
+      "城市间交通费按级别据实报销，伙食和市内交通费按规定标准发放。"
+    ],
+    "policy": {
+      "policy_key": "hfut_travel",
+      "version": "2026-project-v1"
+    }
+  },
+  {
+    "id": "CASE-12",
+    "question": "学生参加教学科研活动出差，报销标准最高能按几类人员执行？",
+    "ground_truth": "学生参与教学科研活动、竞赛、社会实践及调研活动所发生的差旅费，报销标准不得超过第三类人员差旅费标准。",
+    "target_clauses": [
+      "第三十五条"
+    ],
+    "policy_query": {
+      "category": "other",
+      "mode": "general"
+    },
+    "facts": {},
+    "expected_statuses": [
+      "answered"
+    ],
+    "required_points": [
+      "学生参与规定教学科研等活动，差旅标准不得超过三类。"
+    ],
+    "policy": {
+      "policy_key": "hfut_travel",
+      "version": "2026-project-v1"
+    }
+  },
+  {
+    "id": "CASE-13",
+    "question": "出差期间发生紧急材料打印和寄送快递费用，能算差旅费报销吗？",
+    "ground_truth": "可以。确因开展公务发生的打印、复印、传真、寄送、打包等费用，由出差人员据实写出情况说明并经所在单位（项目）负责人批准，凭合法票据报销，列差旅费科目。",
+    "target_clauses": [
+      "第二十六条"
+    ],
+    "policy_query": {
+      "category": "other",
+      "mode": "general"
+    },
+    "facts": {},
+    "expected_statuses": [
+      "answered"
+    ],
+    "required_points": [
+      "确因公务发生的打印寄送等费用可列差旅费。",
+      "须据实说明、单位（项目）负责人批准及合法票据。"
+    ],
+    "policy": {
+      "policy_key": "hfut_travel",
+      "version": "2026-project-v1"
+    }
+  },
+  {
+    "id": "CASE-14",
+    "question": "因公出差可以自己开车去吗？有什么审批和手续要求？",
+    "ground_truth": "因公出差应选择公共交通出行。自驾车出差的，应事先办理审批手续，并与相关单位签订交通安全责任承诺书，因自驾车所引起的安全等问题由出差人员承担。",
+    "target_clauses": [
+      "第二十九条"
+    ],
+    "policy_query": {
+      "category": "other",
+      "mode": "general"
+    },
+    "facts": {},
+    "expected_statuses": [
+      "answered"
+    ],
+    "required_points": [
+      "因公出差应选择公共交通，自驾需事先审批。",
+      "与相关单位签订交通安全责任承诺书，自驾安全等责任由出差人员承担。"
+    ],
+    "policy": {
+      "policy_key": "hfut_travel",
+      "version": "2026-project-v1"
+    }
+  },
+  {
+    "id": "CASE-15",
+    "question": "在途连续坐火车超过12小时，伙食补助怎么算？",
+    "ground_truth": "出差人员在途期间，连续乘坐交通工具超过12小时的，可凭交通票据每满12小时，加发一天伙食补助费。",
+    "target_clauses": [
+      "第三十条"
+    ],
+    "policy_query": {
+      "category": "meal",
+      "mode": "general"
+    },
+    "facts": {
+      "kind": "meal"
+    },
+    "expected_statuses": [
+      "answered"
+    ],
+    "required_points": [
+      "连续在途乘交通工具超过12小时，可凭交通票据每满12小时加发一天伙食补助。"
+    ],
+    "policy": {
+      "policy_key": "hfut_travel",
+      "version": "2026-project-v1"
+    }
+  },
+  {
+    "id": "CASE-16",
+    "question": "同时在专业技术岗位和管理岗位两类岗位上任职的人员，如何选择差旅标准？",
+    "ground_truth": "同时在专业技术岗位和管理岗位两类岗位上任职的人员，可以按照“就高”原则选择差旅费标准。",
+    "target_clauses": [
+      "第六条"
+    ],
+    "policy_query": {
+      "category": "transport",
+      "mode": "general"
+    },
+    "facts": {
+      "kind": "transport"
+    },
+    "expected_statuses": [
+      "answered"
+    ],
+    "required_points": [
+      "同时任专业技术和管理岗位，可按就高原则选择差旅标准。"
+    ],
+    "policy": {
+      "policy_key": "hfut_travel",
+      "version": "2026-project-v1"
+    }
+  },
+  {
+    "id": "CASE-17",
+    "question": "出差订票产生的退票费、民航发展基金可以报销吗？",
+    "ground_truth": "因发生城市间交通费而产生的订票费、经批准发生的签转或退票费、民航发展基金、燃油附加费等相关费用可以凭据报销。",
+    "target_clauses": [
+      "第八条"
+    ],
+    "policy_query": {
+      "category": "transport",
+      "mode": "general"
+    },
+    "facts": {
+      "kind": "transport"
+    },
+    "expected_statuses": [
+      "answered"
+    ],
+    "required_points": [
+      "城市间交通相关订票费、经批准的签转退票费、民航发展基金等可凭据报销。"
+    ],
+    "policy": {
+      "policy_key": "hfut_travel",
+      "version": "2026-project-v1"
+    }
+  },
+  {
+    "id": "CASE-18",
+    "question": "出差乘坐交通工具可以购买交通意外保险吗？能买几份？",
+    "ground_truth": "乘坐飞机、火车、轮船、客车等交通工具的，每人可以购买交通意外保险一份。所在单位统一购买交通意外保险的，不再重复购买。",
+    "target_clauses": [
+      "第九条"
+    ],
+    "policy_query": {
+      "category": "transport",
+      "mode": "general"
+    },
+    "facts": {
+      "kind": "transport"
+    },
+    "expected_statuses": [
+      "answered"
+    ],
+    "required_points": [
+      "每人可购买一份交通意外保险。",
+      "单位已统一购买的，不再重复购买。"
+    ],
+    "policy": {
+      "policy_key": "hfut_travel",
+      "version": "2026-project-v1"
+    }
+  },
+  {
+    "id": "CASE-19",
+    "question": "参加其他单位举办的会议统一安排住宿且费用自理，住宿费超标如何报销？",
+    "ground_truth": "对于参加其他单位举办的会议和培训，由举办方统一安排住宿且费用自理的，凭举办方出具的有效证明，据实报销住宿费。",
+    "target_clauses": [
+      "第十四条"
+    ],
+    "policy_query": {
+      "category": "hotel",
+      "mode": "general"
+    },
+    "facts": {
+      "kind": "hotel"
+    },
+    "expected_statuses": [
+      "answered"
+    ],
+    "required_points": [
+      "其他单位会议/培训，由举办方统一安排住宿且费用自理。",
+      "凭举办方有效证明据实报销住宿费。"
+    ],
+    "policy": {
+      "policy_key": "hfut_travel",
+      "version": "2026-project-v1"
+    }
+  },
+  {
+    "id": "CASE-20",
+    "question": "住宿费发票上没有打印单价和天数该怎么办？",
+    "ground_truth": "如因宾馆客观条件限制无法在发票上体现住宿天数、人数、单价，出差人应实事求是在发票票面予以注明并签字确认。",
+    "target_clauses": [
+      "第十五条"
+    ],
+    "policy_query": {
+      "category": "hotel",
+      "mode": "general"
+    },
+    "facts": {
+      "kind": "hotel"
+    },
+    "expected_statuses": [
+      "answered"
+    ],
+    "required_points": [
+      "因宾馆客观原因缺天数人数单价等信息，出差人应据实票面注明并签字。"
+    ],
+    "policy": {
+      "policy_key": "hfut_travel",
+      "version": "2026-project-v1"
+    }
+  },
+  {
+    "id": "CASE-21",
+    "question": "往返机场乘坐的出租车和机场大巴费用怎么报销？",
+    "ground_truth": "机场到市区的往返出租车、机场大巴等费用凭据报销。",
+    "target_clauses": [
+      "第十九条"
+    ],
+    "policy_query": {
+      "category": "local_transport",
+      "mode": "general"
+    },
+    "facts": {
+      "kind": "local_transport"
+    },
+    "expected_statuses": [
+      "answered"
+    ],
+    "required_points": [
+      "机场到市区往返出租车、机场大巴费用凭据报销。"
+    ],
+    "policy": {
+      "policy_key": "hfut_travel",
+      "version": "2026-project-v1"
+    }
+  },
+  {
+    "id": "CASE-22",
+    "question": "校外单位已经给报销了市内交通费，还能在学校领市内交通补助吗？",
+    "ground_truth": "已由校外单位负担市内交通费用的，不得在学校重复领取市内交通费。",
+    "target_clauses": [
+      "第二十一条"
+    ],
+    "policy_query": {
+      "category": "local_transport",
+      "mode": "general"
+    },
+    "facts": {
+      "kind": "local_transport"
+    },
+    "expected_statuses": [
+      "answered"
+    ],
+    "required_points": [
+      "校外单位已负担市内交通费，不得在校重复领取。"
+    ],
+    "policy": {
+      "policy_key": "hfut_travel",
+      "version": "2026-project-v1"
+    }
+  },
+  {
+    "id": "CASE-23",
+    "question": "出差当天往返，中午需要休息可以报销房费吗？",
+    "ground_truth": "出差当天往返，根据需要可安排午休房，房费凭据报销。",
+    "target_clauses": [
+      "第二十七条"
+    ],
+    "policy_query": {
+      "category": "hotel",
+      "mode": "general"
+    },
+    "facts": {
+      "kind": "hotel"
+    },
+    "expected_statuses": [
+      "answered"
+    ],
+    "required_points": [
+      "当天往返按需安排午休房，房费凭据报销。"
+    ],
+    "policy": {
+      "policy_key": "hfut_travel",
+      "version": "2026-project-v1"
+    }
+  },
+  {
+    "id": "CASE-24",
+    "question": "邀请校外专家来校从事学术交流，专家的交通费和住宿费按什么标准报销？",
+    "ground_truth": "邀请校外人员从事相关教学、科研等活动，按其职务（职称）的标准报销受邀人员城市间交通费、住宿费、咨询费或劳务费，据实发放伙食补助费和市内交通费。",
+    "target_clauses": [
+      "第二十八条"
+    ],
+    "policy_query": {
+      "category": "other",
+      "mode": "general"
+    },
+    "facts": {},
+    "expected_statuses": [
+      "answered"
+    ],
+    "required_points": [
+      "邀请校外人员从事教学科研等活动，城市间交通和住宿按其职务职称标准报销。"
+    ],
+    "policy": {
+      "policy_key": "hfut_travel",
+      "version": "2026-project-v1"
+    }
+  },
+  {
+    "id": "CASE-25",
+    "question": "开展调研测试因地理条件限制，已事先办理审批手续并在目的地租车，租车费按什么费用类别报销？",
+    "ground_truth": "在目的地租车的视同市内交通费，按实报销，票据须合规；若租车费用达到一万元（含）以上还需签订租车合同。",
+    "target_clauses": [
+      "第二十九条"
+    ],
+    "policy_query": {
+      "category": "other",
+      "mode": "general"
+    },
+    "facts": {},
+    "expected_statuses": [
+      "answered"
+    ],
+    "required_points": [
+      "题设目的地租车费用视同市内交通费，按实报销且票据须合规。",
+      "一万元含以上需签订租车合同。"
+    ],
+    "policy": {
+      "policy_key": "hfut_travel",
+      "version": "2026-project-v1"
+    }
+  },
+  {
+    "id": "CASE-26",
+    "question": "科研出差确因特殊情况超标乘坐交通工具或住宿，事后未事先报告直接来报销能批准吗？",
+    "ground_truth": "不能直接报销。第三十一条明确规定“须事先向单位负责人报告”，报销时再做书面说明并经负责人审批后方可报销，事前报告是前置必要程序。",
+    "target_clauses": [
+      "第三十一条"
+    ],
+    "policy_query": {
+      "category": "other",
+      "mode": "general"
+    },
+    "facts": {},
+    "expected_statuses": [
+      "answered"
+    ],
+    "required_points": [
+      "科研特殊超标须事先向单位负责人报告，不能直接事后报销。",
+      "报销时须书面说明并经单位负责人审批；不得声称系统能批准。"
+    ],
+    "policy": {
+      "policy_key": "hfut_travel",
+      "version": "2026-project-v1"
+    }
+  },
+  {
+    "id": "CASE-27",
+    "question": "自驾车出差的汽油费可以单独拿来报销吗？",
+    "ground_truth": "不可以。汽油费据实报销，应连同住宿费和过路过桥费一起报销不得分拆，并凭住宿费和过桥过路费发票发放伙食补助。",
+    "target_clauses": [
+      "第二十九条"
+    ],
+    "policy_query": {
+      "category": "other",
+      "mode": "general"
+    },
+    "facts": {},
+    "expected_statuses": [
+      "answered"
+    ],
+    "required_points": [
+      "汽油费不得单独分拆，须与住宿和过路过桥费一起报销。"
+    ],
+    "policy": {
+      "policy_key": "hfut_travel",
+      "version": "2026-project-v1"
+    }
+  },
+  {
+    "id": "CASE-28",
+    "question": "青海西宁出差，伙食补助适用什么日标准，按什么天数计算？",
+    "ground_truth": "青海伙食补助适用120元/人/天的标准，按出差自然（日历）天数计算包干使用。",
+    "target_clauses": [
+      "第十七条"
+    ],
+    "policy_query": {
+      "category": "meal",
+      "mode": "general"
+    },
+    "facts": {
+      "kind": "meal"
+    },
+    "expected_statuses": [
+      "answered"
+    ],
+    "required_points": [
+      "青海伙食补助为120元/人/天。",
+      "按出差自然（日历）天数计算。"
+    ],
+    "policy": {
+      "policy_key": "hfut_travel",
+      "version": "2026-project-v1"
+    }
+  },
+  {
+    "id": "CASE-29",
+    "question": "与其他单位开展科研合作对方提供了住宿，能否不提供合作方证明直接自己写说明报销？",
+    "ground_truth": "不能随意替代。第二十四条第（一）项规定原则上凭合作方提供的有效证明；只有若因客观原因无法取得合作方有效证明时，出差人员才据实写出情况说明并经单位（项目）负责人审核同意后据实报销。",
+    "target_clauses": [
+      "第二十四条"
+    ],
+    "policy_query": {
+      "category": "other",
+      "mode": "general"
+    },
+    "facts": {},
+    "expected_statuses": [
+      "answered"
+    ],
+    "required_points": [
+      "原则上须合作方有效证明，不能任意用自行说明替代。",
+      "只有客观原因无法取得证明时，才可据实说明并经单位（项目）负责人审核同意。"
+    ],
+    "policy": {
+      "policy_key": "hfut_travel",
+      "version": "2026-project-v1"
+    }
+  },
+  {
+    "id": "CASE-30",
+    "question": "合肥工业大学差旅费管理办法由学校哪个部门负责解释？",
+    "ground_truth": "本办法由财务部负责解释。",
+    "target_clauses": [
+      "第三十六条"
+    ],
+    "policy_query": {
+      "category": "other",
+      "mode": "general"
+    },
+    "facts": {},
+    "expected_statuses": [
+      "answered"
+    ],
+    "required_points": [
+      "办法由财务部负责解释。"
+    ],
+    "policy": {
+      "policy_key": "hfut_travel",
+      "version": "2026-project-v1"
+    }
+  }
+]
