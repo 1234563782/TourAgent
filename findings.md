@@ -1,143 +1,176 @@
-# Redis 评估发现
+# 修复发现
 
-- 项目为 Python/FastAPI/LangGraph 差旅助手，依赖 PostgreSQL checkpoint、业务 memory、会话、资源配额、认证与附件/发票持久化。
-- `.env.example` 明确：长期偏好、历史行程、对话检查点统一使用 PostgreSQL；认证登录尝试限制也存 PostgreSQL；资源并发与每日配额依赖 PostgreSQL 事务和 advisory lock。
-- `memory.py` 的 SQLite 仅是离线测试/迁移适配器；`memory_pg.py` 是正式业务记忆和 LangGraph checkpoint 后端。
-- Redis 适合补充短 TTL、跨进程低延迟状态和队列/发布订阅；直接替换 PostgreSQL 会削弱审计、事务、恢复和长期数据可靠性。
-- 编译检查：`business_travel`、`scripts`、`tests` 全部可编译。沙箱内 psycopg 受 `_ctypes` DLL 限制，切换到项目既有沙箱外验证后，迁移专项 7/7 通过。
-- 运行时代码和对外文档不再要求 company_id；`single_school_migration.py`、`convert_school_bundle.py` 及迁移测试保留旧字段仅用于读取、转换和验证历史数据库。
-- 正式 memory 只读预检仍为 `ready`，统计 148 个历史 thread 需要改写；未执行 `--apply`。正式 policy 预检明确返回 `policy_digest_mapping_required_convert_all_existing_bundles`，说明必须先为全部既有政策包生成摘要映射；同样未写入数据库。
+## 已确认事实
 
-## 2026-10-29 长期偏好提议核验
+## 2026-10-30 Token 优化专项审查
 
-- tuniu.py 的酒店查询参数确实只有城市、入住/离店日期和入住人数；品牌、星级、早餐等只能在供应商返回后本地处理。
-- planning.py 查询阶段会按 _candidate_sort_key 排序并截断到 settings.max_candidates，但之后还会构造 recommendation_checks，再由 _selection_candidates 按组件和合规状态选一个档位；提议把排序键排在合规档位之后描述得不完整，不能直接等同于最终选择顺序。
-- candidate_input.py 的 compact 投影会移除酒店 brandName、hotelId 等字段；偏好匹配若发生在模型候选输入之后会失去品牌依据，必须在原始 Candidate 上完成并把安全的 preference_checks 单独投影。
-- 当前正式身份与数据隔离以 user_id 为边界。memory_pg.py 的 trips 表主键是 (user_id,draft_id)，没有 company_id；提议的 company_id 主键会引入未定义的公司归属和授权模型。
-- memory_pg.py 初始化明确删除已退休的 user_preferences 表；graph.py 系统提示明确长期偏好存储不支持，query_memory 只读保存的行程草稿。提议不是局部接入，必须同步修改身份、存储、图提示词和测试契约。
-- trips.data 只在用户显式保存草稿后写入；从历史行程派生偏好必须先定义 selected 的稳定结构、样本去重和撤销/删除，否则阈值会把重复草稿或未确认候选当成行为信号。
-- 提议的硬过滤保底“过滤为空就全量返回”与“硬性要求不满足就不能选”语义冲突；不能静默返回违反用户硬要求的候选。
-- 180 天自动降级、expires_at 与 semantics 状态机尚未定义；数据库约束不足以保证 value schema、数组去重、星级/品牌规范化和来源证据完整性。
+### 调用链与基线
 
-## 2026-10-29 身份映射与 RAG Prompt 冲突只读诊断
+- 当前每轮理解链路通常包含 JEV 分类（`business_travel/graph.py:339`）、槽位协议调用（`slots.py:644`），以及语义审查调用（`slots.py:1031`）；JEV 不可用时仍会进入槽位模型。槽位失败/修复可按 `slot_max_attempts=3` 重试，规划选择默认最多 2 次，政策回答和审核默认最多各 2 次。
+- `context_budget.py` 已实现按角色输入预算、历史分组、工具结果压缩和实际 usage 校准，这是现有 token 控制的基础。
+- 默认上下文配置为 65536 窗口、8192 输出、4096 margin、supervisor 最近历史 12000、summary 2048、单工具结果 2048；这些是上限，不代表每次实际发送量。
 
-### 已观察事实
+### 高收益观察
 
-- 当前 `policies/hfut-2026/reviewed-rules.json` 只定义交通映射：`title_categories.院士=一类`、正高级=二类；住宿表头在 `manifest.json` 中是 `部级`、`司局级`、`其他人员`。规则文件没有当前确认的 `一类→部级`、`二类→司局级`、`三类→其他人员` 可执行映射；加载后 `UniversityRules.lodging_categories` 为默认空字典。
-- `business_travel/university_policy.py:20-22` 将 `lodging_categories` 标为兼容字段并注明“not applied”；`lodging_standard_for()` 只接受 facts 中单独给出的住宿身份，明确拒绝从交通类别、职称或岗位等级选择住宿列。`planning_standards_for()` 对“院士”实测返回 `('一类', None)`。
-- `business_travel/policy_pg.py:499-531` 的身份证据生成同样调用 `transport_category()` 与 `lodging_standard_for()`，不会生成住宿档次。
-- `business_travel/policy_rag.py:143-147` 的 `ANSWER_PROMPT` 明确要求交通/住宿独立、院士只能确定交通类别、不得把一类或院士说成部级/司局级/其他人员；`REVIEW_PROMPT` 及其共享 `REVIEW_CONTEXT` 在 199、214、217 行重复相同限制。
-- Reviewer 的 `unsupported_claim` 并非只在 Prompt 中出现：`policy_rag.py:365-386` 将任何 claim 检查失败映射为 `unsupported_claim`，`policy_rag.py:466-480` 在拒绝后重试，耗尽次数后进入终止/partial 或 insufficient 路径。
-- 现有回归测试把“交通身份不选择住宿档次”作为预期：`tests/test_university_policy.py:181-193`、`tests/test_rag_corrections.py:105-117`；因此当前测试会保护旧规则，而不是 10 月 16 日描述的新映射。
-- 运行验证：`tests.test_university_policy` 39 项通过；`tests.test_rag_corrections` 无法导入，项目虚拟环境加载 `_ssl` DLL 失败（环境错误，未执行到测试断言）。独立 Python 探针确认 `rules.lodging_categories={}`、院士 transport=`一类`、lodging=`None`。
+1. JEV 的 payload 同时发送当前消息、全部 HumanMessage conversation、current_slots、task_context、pending_tasks、pending_turns；随后槽位调用又发送 conversation、任务快照、pending turns、JEV hint/route。相邻两次调用存在明显重复输入。可将 JEV 改为只看当前消息 + 受限摘要/哈希，并让槽位调用复用本轮确定的轻量 route，预计减少每轮输入 token，需先做意图准确率和追问回归。
+2. 槽位协议固定提示词很长：`ROUTE_PROMPT` 约 7367 字符（约 1842 粗略 token），`FACT_PROMPT` 到 `TRIP_PROMPT` 约 3940 字符；Trip/Expense 又在 FACT_PROMPT 上叠加。每次重试都会重复发送。可把通用安全/证据规则压缩为短版，并把只适用于特定操作的规则按路由注入。
+3. `semantic_review.REVIEW_PROMPT` 是独立的大段审查协议，且审查 payload 包含 task schema、resolved_tasks、proposal、proposed_slots 和上下文；这是一次额外模型调用。可先用确定性校验筛掉无变更、纯 other/天气/保存读结果等不需要事实审查的路径，或只发送 changed fields 和相关用户句子。
+4. 政策 RAG 的一次回答可能包含 proposal、semantic review、失败反馈重试；`policy_rag_max_retrievals=2` 与 `policy_rag_max_answer_attempts=2` 组合会形成多次生成/审核。可按决策类型设置预算：已足够证据时一次生成 + 一次审核，只有 reject/retrieve 才进入第二次。
+5. 监督器固定提示词约 3025 字符（约 757 粗略 token），且每轮还有 current task、subject references、task snapshot 三段 SystemMessage。可将不变规则改为短版，并把三段状态合并成一个紧凑 JSON。
 
-### 结论与置信度
+### 中收益观察
 
-- **Prompt 硬编码与目标映射冲突：真实存在，高置信度。** Prompt 文字与用户所述“一类→部级”等规则方向直接相反。
-- **“底层规则已经能够确定标准”：当前 checkout 未观察到，结论为不成立（高置信度）。** 当前底层实际仍按独立身份处理，并且已有测试明确断言不得推导；可能存在未同步的外部/历史确认，但本地代码、配置和提交历史没有证据。
-- **“必然已把回答降级为 partial”：部分成立，中等置信度。** 宾语生成的 `partial` 可能被 Prompt/reviewer 拒绝并触发重试/终止，但当前代码还有前置 `lodging_lookup` 的 `clarify`/`insufficient` 分支；仅凭静态代码不能把所有实际会话都归因于 Prompt。需用同一服务版本、facts（院士+目的地、无住宿档次）和模型调用 trace 复现。
+- `context_budget.request_size` 用 UTF-8 JSON 字节估算而非 provider tokenizer，安全但可能保守；usage 已被记录，可按角色校准 margin，降低不必要的 blocked/过度压缩。
+- `planner_candidate_mode=compact` 已存在；但选择阶段仍把每个候选的 timeline_check 和 recommendation_check 嵌入，且 `planner_max_attempts=2` 会把失败上下文追加后重发。可只在重试时发送失败原因和候选 ID 子集。
+- `policy_context_limit=40`、`policy_context_chars=24000`、rerank candidates=40 主要影响检索/重排输入和后续政策 prompt；可以按 query 类型动态缩小，尤其是精确住宿表查询。
+- 日期当前默认以 suffix 注入，避免 prefix 破坏缓存；可保持该设置并统一固定 prompt，减少前缀缓存失效。
 
-### 最小验证实验
+### 不建议直接删减
 
-1. 在当前发布包中直接调用 `prepare_package()`、`UniversityRules.model_validate()` 和 `planning_standards_for()`，断言院士返回住宿档次部级；当前实验已反证为 `None`。
-2. 若先把规则映射接入，再用固定 FakeModel 让 writer 输出“院士对应部级”并让 reviewer 读取当前 Prompt，观察 reviewer 是否返回 `reject/unsupported_claim`；这需要先获得实现授权，当前只读任务未修改代码。
-3. 在真实部署中固定 commit、policy version、facts 和 query，记录 `policy_rag` 的 proposal、review verdict、issues、最终 status，以区分 `clarify`、`partial`、`insufficient` 与 Prompt 拒绝。
+- 不应删除 tool sequence 校验、版本/来源哈希、引用原文校验、历史数据不可信提示、语义审查中的否定/归属/单位规则。这些是正确性和安全边界，应该通过压缩表达或结构化字段传输节省 token。
 
-## 2026-10-29 遗留住宿映射清理
+### 安全附带发现
 
-- 用户确认不采用旧的交通类别到住宿档次映射。
-- 已删除 `UniversityRules.lodging_categories` 兼容字段；正式的账号 `lodging_standard` 字段仍保留。
-- 已删除 `tests/test_plan_policy_citations.py` 中 `legacy_rules` 参数及两处调用，删除 `tests/test_rag_corrections.py` 对该字段存在性的测试。
-- 代码和配置目录中不再引用 `lodging_categories` 或 `legacy_rules`；Prompt、manifest 和身份字段仍保持交通/住宿分离语义。
-- 验证：`compileall -q business_travel tests` 通过；`tests.test_university_policy` 39 项通过。`tests.test_plan_policy_citations` 因当前运行时 `_ctypes` DLL 导入错误无法执行；此前也遇到缺少测试目录导入路径的问题，已用 `PYTHONPATH` 修正后仍被 `_ctypes` 阻断。
+- `TourAgent/.env` 当前包含看起来像真实的 JEV 和 rerank API 凭据。未在本报告复述其值；应立即轮换并确认 `.env` 未被 Git 跟踪，避免把 token 优化工作掩盖成凭据泄露。
 
-## 2026-10-29 方案 A-D 只读评审
+### 验证边界
 
-### A：PolicyAnswer 前置清洗
+- 本轮只读审查，没有调用真实 JEV/LLM，也没有修改业务代码；收益百分比是待基准测试的估计。
 
-- 当前 `PolicyAnswer` 的字段都有默认空值：claims/limitations/requested_fields 默认空列表，question/search_query 默认空字符串；`consistent_action` 主要拒绝非空的跨动作字段，以及 answer/partial/clarify/retrieve 的真正语义不一致。模型补齐 `question=""`、`search_query=""`、`claims=[]` 等默认空值本身不会触发对应的冲突校验。
-- 当前示例中对 answer 删除空 `limitations`/`requested_fields` 没有实际收益，因为默认值已经是空列表；但对 `partial` 删除 limitations 会把本来需要拒绝的非法 partial 伪装成 answer-like payload，随后仍会因 `partial_requires_limitations_only` 失败。
-- before validator 若原地修改 data 会污染调用方对象；应复制 dict。不能把非空跨动作值清空，也不应把非法类型通过 `str()` 转成合法值。建议仅丢弃空白字符串和空列表，然后继续让 after validator 拒绝真正混合动作；同时为默认空字段补充回归测试和工具 schema 说明。
+## 业务流程线索
 
-### B：Reviewer Claim-level Pruning
+## 问题与风险
 
-- 当前只有终止阶段 `PolicyEvidenceReview` 返回逐条 `claim_checks`；普通 `PolicyAnswerReview` 只有 verdict/issues，没有 claim 索引。因此示例不能直接用于普通审核拒绝。
-- `_review_evidence()` 会把 unsupported 索引放在 `review_feedback["unsupported_claim_indices"]`，但这只发生在 finalization 路径；普通审核拒绝的 `review_feedback` 为空。
-- 直接将未支持 claim 改成 `missing_evidence` limitation 可能违反 limitation 规则：detail/next_step 不能夹带未经引用的政策结论；“部分限制条款”也可能不是用户实际缺口。还需重新做 citations/limitations 校验并保证 partial 的 reviewer 重新审核。
-- 若只有 unsupported claim 且存在至少一个有证据 claim，安全实现应是终止阶段专用、保留 supported claim、生成基于实际 claim 的结构化 limitation，并再次跑 `_review_evidence()`；不能在普通拒绝或任意 `unsupported_claim` 上直接发布。
+## 待验证项
 
-### C：超限平滑截断
+## 2026-10-16 本轮规则确认
 
-- 当前 `policy_pg.py` 已在数据库检索阶段按 `policy_context_limit` 截断，并通过 `context_incomplete` 标记缺少链接闭包；`policy_rag.py` 发现 `context_incomplete` 或字符超限后直接返回 `incomplete`，现有测试明确锁定该安全行为。
-- 直接 `evidence[:settings.policy_top_k]` 有三个问题：`policy_top_k` 是检索候选规模，不是已验证证据排序；可能丢掉住宿表行、scope 条款或 related_ids 闭包；按字符截断还可能破坏同版本/同文档来源完整性。
-- 如要改善用户体验，应在 retriever 侧做“有界、可解释的证据选择”：保留 exact lodging rows、reviewed identity/config source、scope clauses 和相关闭包，再按检索排序填充；若仍不完整，继续返回 partial/incomplete 并明确披露截断原因。不能把不完整上下文直接交给模型当作完整 answer。
+- 用户已确认：大陆因公出差、未说明入住人数默认 1 人、未提及专项审批默认无专项审批、酒店搜索报价可作为推荐阶段的金额估计、按查询范围展示对应政策、身份/头衔应参与交通和住宿标准匹配。
+- 已确认交通规则包中 `院士` 映射为交通 `一类`，见 `TourAgent/policies/hfut-2026/reviewed-rules.json`。
+- 已确认住宿附表的实际列只有 `部级`、`司局级`、`其他人员`，且项目清单明确警告交通一二三类不能直接等同住宿档次，见 `TourAgent/policies/hfut-2026/manifest.json`。
+- 当前唯一业务歧义：是否将“院士”映射为住宿附表的“部级”，同时保留交通字段为“一类”。不能直接把住宿标准命名为“一类”，因为底层住宿表没有该列。
+- 用户已确认统一映射：一类→部级、二类→司局级、三类→其他人员。
+- Jev 当前继续只做意图、范围、交通方式和行程方向分类；身份到政策级别由活动政策配置和确定性代码完成，避免增加 Jev token 及引入不可复现的政策判断。
+- 已实现 `lodging_categories` 配置、身份/交通类别到住宿档次的推导，以及 PostgreSQL 规划阶段的标准注入。
+- 已增加旧版已发布政策规则的兼容默认值，避免数据库中暂未重载新增字段时启动失败。
+- 学生规划采用条件性默认：活动性质未知时推荐按三类/其他人员，但正式政策核验仍要求 `student_activity_eligible=True`。
 
-### D：policy_query 持久化/继承
+## 2026-10-22 竞品基准初步发现
 
-- `PolicyQuery.coverage` 已支持 `target/all_regions`，`policy_query_dump()` 会保留 all_regions。
-- `slots.py:797-802` 在 policy_explain 的 fact-only update 且未提交新 policy_query 时，已经从旧 subject 复制 policy_query；`slots.py:809` 也把显式的新 query 写回任务。
-- `_scope_expansion_target()` 和 `_coalesce_scope_expansion()` 已将 all_regions 追问识别为同一政策事项的 update，并保留原 subject 的 destination/identity facts；对应测试覆盖 `test_policy_scope_expansion_preserves_confirmed_destination`。
-- 因此在 `graph.py` 再按 `{**prev_query, **curr_query}` 合并存在风险：`current_task` 不是稳定的 subject policy_query 来源；空/default coverage 可能覆盖已有 all_regions；并且会绕过 slots.py 对任务 revision、scope change 和目标唯一性的校验。若仍有真实丢失案例，应先查 slot extraction 的输入/提交结果和 trace，再在 slots 层补回归测试。
+- 项目定位：高校/组织内部的智能差旅助手，当前核心是对话式行程规划、航班/火车/酒店只读搜索、天气、个人偏好/历史行程、政策 RAG 与确定性费用核验、任务追问/恢复/确认、组织与会话隔离。
+- 明确边界：不做预订、支付、取消/退改、审批流、报销提交、保险理赔；供应商结果存在库存/价格不完整和报价口径不确定边界。
+- Web/API 已覆盖登录、会话、流式聊天、运行状态/恢复、偏好读写；CLI 还有 `/history`、`/preferences`、`/resume` 等交互命令。
+- 对比时应把“企业商旅平台的交易闭环能力”与“本项目有意不做的参考/合规助手边界”分开，避免把所有商业平台功能直接视为缺陷。
 
-### 综合建议
+## 2026-10-22 竞品对照结论
 
-- 优先做 A 的最小安全修复和测试。
-- B 只在 final evidence review 中实现受限版本，并要求重新审核；暂不对普通 reviewer reject 自动发布。
-- C 不按简单切片实现，先建立证据优先级/闭包选择器。
-- D 先用现有 slots.py 测试与真实 trace 复现；当前代码已有继承机制，不建议在 graph.py 重复合并。
+对比口径：本项目是高校国内差旅的参考规划、政策解释和报销条件核对，明确不做下单、支付、审批办理、报销提交和保险理赔。不以企业商旅平台的交易闭环直接判为缺陷。
 
-## 2026-10-29 A/B 纠偏方案复核
+已对照公开资料：携程商旅高校方案与全流程/AI Agent 介绍、阿里商旅差标手册、合思申请审批说明、差旅壹号解决方案页、Navan 2026 产品更新，以及中国科大差旅平台操作指南。分贝通等自评评分不作为事实。
 
-- 用户确认 A 只处理 Tool Call 的 `None`/空白占位，保留动作互斥；评审结论正确。实现应使用 `deepcopy`，只处理已知字符串字段 `question/search_query` 和列表字段 `claims/limitations/requested_fields`，不把任意类型通过 `str()` 强转。
-- 用户确认 B 只在终止 `PolicyEvidenceReview` 有逐条索引、issues 唯一为 `unsupported_claim`、至少保留一条 supported claim 时执行；修剪后必须重新校验引用并重新走证据审核。评审结论正确。建议在 generate 的 final 分支调用独立 helper，不在普通 `PolicyAnswerReview` 拒绝路径处理。
-- C 的证据分层与 D 的 slots 继承判断维持此前结论：不做简单切片，不在 graph 重复合并。
-- 本轮未修改业务代码。
+相对本校《差旅费管理办法》和同类助手，优先缺口：
+1. 不能把已核验行程导出为出差审批单/报销单草稿，也没有预订交接。
+2. 可执行规则未覆盖一类人员的年龄与国际行程满5小时例外、随行一人、双肩挑就高、夕发朝至软席、轮船。
+3. 餐补只核单日一般标准，未按自然天数汇总，也未计算连续在途满12小时加发。
+4. 报销材料清单、两个月时限、公务卡或转账结算要求没有产品化。
+5. 登录身份不绑定政策待遇，用户可口头声明职级。
+6. 政策发布仍是命令行，财务管理员不能自助更新财政部住宿标准。
 
-## 2026-10-29 三项方案复核补充
+有意不做且不应视为缺陷：预订支付、审批流执行、报销提交、保险理赔、企业用车下单、国际行程规划。政策正文适用范围是国内差旅。
 
-### `.gitignore` 临时目录
+不合理点：库存详情查询很深，但结果不能预订也不能交接，报价容易过期；精确住宿查询依赖模型抽出 kind=hotel，真实问答可能退回普通检索；学生未知活动时按三类出方案，正式核验仍可能不通过。
 
-- 当前现象属实：`git status` 会因 `.tmp-test/`、`pytest-cache-files-*` 和权限受限目录产生大量 `Permission denied`；但用户级 Git exclude 的权限警告是独立问题，项目 `.gitignore` 不能消除。
-- `git ls-files` 显示 `.tmp-test/e.txt`、`.tmp-test/jieba.cache`、`.tmp-test/o.txt` 已被跟踪，因此新增 ignore 规则不会改变这些文件的跟踪状态；`tmpk5l91ry/memory.sqlite` 也处于已有删除改动，不能把它当作未跟踪垃圾擅自清理。
-- `.tmp-test/` 和 `pytest-cache-files-*/` 方向合理；`tmp*/`、`*.sqlite` 过宽，可能隐藏合法临时命名目录、数据库 fixture 或本地数据，实施前应检查命中清单并优先使用项目根目录限定模式。
+## 2026-10-22 JEV 意图识别只读诊断
 
-### 酒店品牌与 compact
+边界：只读代码、离线测试和 2026-10-19 保存的 10 条真实分类结果。本轮没有调用 JEV，没有看运行中的服务，没有改业务代码。
 
-- `tuniu.search_arguments()` 的酒店查询只发送城市、入住/退房日期和入住人数，未发送品牌、星级、早餐过滤条件；供应商返回归一化会保留 `hotelId`、`starName`、`brandName`、`meal`。
-- `candidate_input.py` 的 compact 明确删除 `hotelId`；非空 `brandName` 会保留，品牌为空时才由通用空值压缩删除。当前没有 QueryFields/QueryRequest 的品牌、星级、早餐偏好字段，也没有名为 `preference_checks` 的确定性硬过滤链路。
-- 因此“模型完全看不到品牌”不完全属实；“用户品牌硬约束当前不会被可靠执行”属实。若要实现硬约束，应在 provider 结果进入 `max_candidates` 截断前，依据结构化请求字段完成规范化匹配和过滤，再排序；模型投影可保留非空品牌/星级/餐食作为解释事实，`hotelId` 可继续仅留在内部原始 Candidate 供详情查询。
+已观察：
+- 四类意图用独立 Noul，阈值默认 0.8；直接建任务要求四类都明确且复杂路由明确为否。
+- 2026-10-19 空状态下 10/10 意图匹配，模型 jev-1.13.0。其中“查机票并保存偏好”的意图正确，但 requires_task_routing=0.21，直接路由被放弃。
+- 已修复并复测的 other 误报只覆盖那一句，不代表当前 jev-latest 仍是 1.13.0。
+- hint() 只输出超过阈值的正例。不确定时测试仍断言 jev_hint.intents 只有 plan_trip，policy_explain=0.5 被丢掉。
+- 有待追问时 classify() 只问 is_clarification_answer，不再做四类意图判断。
 
-### 审批/报销导出
+推断：回退路由可能把不完整 hint 当成完整意图；追问轮如果误判为补充答案，会跳过新意图。这两点尚未用真实模型复现。
 
-- 当前已有结构化 `draft`、`save_trip`（需确认后保存）和 `plan_checks.render_draft()` Markdown 文本渲染；因此“结果只留在聊天气泡和数据库草稿”不应表述为“没有结构化结果”。
-- `web.py` 现有路由覆盖聊天、会话、运行状态、发票预审和附件，没有按用户授权导出行程/审批/报销草稿的 JSON、Markdown 或 PDF 下载接口；用户确实缺少一键交接入口。
-- 行程 draft 可支持第一阶段的行程单 JSON/Markdown 导出，但直接称为“报销单”还缺少学校模板字段、费用归集/项目号、审批状态、发票关联等契约；导出必须标注草稿、待核验、未预订/未审批，不能把政策检查或供应商起价变成已批准金额。
+## 2026-10-22 四类意图是否合理
 
-### 结论
+判断：plan_trip、policy_check、policy_explain 对应不同执行器，拆开合理。other 把天气、偏好、读旧结果、保存/取消/恢复塞进同一个对等意图，和操作类型混在一起，作为第四类业务意图不合理。这四类是独立存在判断，不是互斥单选。
 
-- 方案 1：问题真实；规则方向可采纳，但不能原样加入四条宽泛规则，也不能未经授权删除已跟踪文件。
-- 方案 2：问题部分真实、描述过度；应先补齐用户偏好契约和 provider 前的确定性过滤，不能只依赖 compact 保留字段或模型判断。
-- 方案 3：产品缺口真实；建议先定义按 user/task/revision 授权的 JSON/Markdown 导出契约，再评估 PDF 和学校模板适配。
+## 2026-10-22 追问是否应作为意图
 
-## 2026-10-29 用户出行偏好画像方案复核
+结论：不应把追问做成第五个业务意图。Rasa CALM 把 clarify 做成理解命令，把用户回答做成 set/correct slot；缺槽位时表单不重新分类意图。LangGraph 用 interrupt 暂停并在同一节点恢复。ISO 24617-2 把提问当作交际功能，和领域语义内容分开。本项目应保留待答关系判断，同时继续识别这句是否另有新业务目标。
 
-- 身份与偏好分离、偏好只在同一合规层内做软排序的原则正确；但当前项目已退休长期偏好能力，memory_pg.py 不创建替代偏好表，graph.py 明确不支持长期偏好，tests/test_preference_autosave.py 将其作为回归契约。新增 user_travel_profiles、偏好 API 和画像读取会直接冲突。
-- save_trip 是保存当前草稿的用户确认，不等于确认酒店品牌、座位或早餐为长期偏好；selected 可能含模型补选、fallback、未知库存和未核验报价，不能直接统计成习惯。
-- 方案缺少版本、来源、置信度、撤销/清除、过期、审计和并发更新条件；Redis 降级还需要缓存键、TTL、失效和 PG 不可用语义。
-- 当前 QueryRequest 没有长期偏好字段；应使用独立只读 preference snapshot，避免混淆本次硬约束与长期软偏好。tuniu 的 brandName/starName/meal 不能分别直接当作品牌、星级和早餐布尔值；现有 Candidate 也没有靠窗/过道座位信息。
-- normalize_tuniu 会先按 provider limit 截断，planner 再截断；仅在 planner 排序无法保证偏好酒店进入候选池。偏好命中应在 provider 结果截断前扩大召回或做明确保底扫描。
-- custom_notes 不应直接进入 Prompt；接口必须绑定已认证 user_id，禁止客户端指定目标用户，并提供白名单、限长、审计和清除操作。
-- 建议先做显式偏好最小闭环，暂缓历史自动画像；在当前项目边界下，本方案判定为方向可取、直接改造不可接受。
+## 2026-10-22 追问分流已实现
 
-## 2026-10-29 纯 PostgreSQL 用户偏好画像方案复核
+待追问时 JEV 同时判断是否回答待补字段，以及是否另有新目标。回答不是意图。四个意图都明确且不需要更细拆分时，回答部分走 update_facts，额外目标另建任务。未回答或意图不确定时回到 TurnRoute。离线测试覆盖纯回答、混合目标和不确定回退。未调用真实 JEV。
 
-- 去掉 Redis、使用现有 memory_pg.py 的同一 PostgreSQL schema、把偏好限制为合规层内软排序，这些方向比前版合理；但新增表仍会重新启用当前已退休的长期偏好能力，必须先改变产品边界、测试契约和迁移策略。
-- setup_memory() 当前会显式删除 user_preferences 且不创建偏好表；若改为 user_travel_profiles，不能只追加 CREATE TABLE，还要更新单学校迁移的表清单、初始化测试、回滚/清除语义和现有无偏好 API回归测试。
-- UserPreferenceProfile 不应让客户端提供 user_id；服务层应使用已认证 MemoryIdentity 绑定用户。JSONB 需要 schema_version、字段白名单、版本/并发更新条件、来源、置信度和清除操作，不能只用 user_id/preferences/updated_at。
-- _preference_match_score(item, pref) 的 profile 参数与现有 planning.py 的 policy recommendation_profile 概念不同；应使用独立 preference snapshot，不能把长期偏好塞进 QueryRequest 或政策 profile。
-- 方案的排序代码只查 item.label 和不存在的 has_breakfast，未使用 star_min；当前 Tuniu 字段是 brandName、starName、meal，必须先做结构化字段读取、品牌别名规范化、星级解析和早餐的含早/不含早/未知状态。当前 Candidate 没有靠窗/过道座位信息，train_seat_position 不能宣称已实现。
-- normalize_tuniu() 已按 provider limit 截断，planning.py 再按 max_candidates 截断；只在 planner 的 _select_top_hotel_candidates 内加偏好分，可能在偏好排序前丢掉目标品牌。需要扩大 provider 召回或在 provider 截断前做偏好保底扫描。
-- 同一合规桶内按偏好、价格、房态排序与现有 _candidate_sort_key 的实际 tuple 不一致；当前 key 仍会把 availability 放在价格前，应明确 tie-break 目标并固定测试。
-- avoid_red_eye 默认 True 会在用户没有设置时产生隐含偏好；长期画像应使用显式/未知状态，不能用默认值替用户做偏好选择。time_window、航班/列车时段、跨午夜和时区也需定义。
-- save_trip 后异步统计没有现成可靠作业契约。若保留历史沉淀，需要幂等事件、失败重试、版本更新、显式偏好优先级、样本去重，并只统计用户确认保存且最终采用的候选，排除 fallback、alternatives、sold_out、unknown inventory 和证据缺失记录。频次 >=3/5 还需要置信度与撤销规则。
-- 建议分阶段：先实现显式偏好 PG CRUD 和 preference snapshot 注入；再在已截断前解决偏好候选召回；最后才做历史统计。custom_notes 首版应删除或改为白名单结构化标签，不要直接进 Prompt。
+## 2026-10-22 other 收窄方案
+
+不增加第五个意图。三个业务目标保留。other 只留天气、偏好和闲聊。保存、取消、恢复、重试、阅读旧结果、补充事实是操作，由现有 TurnRoute 绑定目标；JEV 不直接为这些操作建 other 任务。JEV 不能填写任务 ID，所以这些操作不能走直接建任务。
+
+## 2026-10-22 两轴方案是否可落地
+
+已观察：
+- 四个意图对应不同执行器。`plan_trip`、`policy_check`、`policy_explain` 由业务节点执行；只有 `intent == other` 才会进入带 `save_trip`、`read_task_result`、天气和偏好工具的助手节点。见 `TourAgent/business_travel/graph.py` 的 dispatch。
+- `TurnRoute` 只有 `new_task`、`update_facts`、`change_intent`、`task_controls`（resume/cancel）、`recovery`（retry/discard）。没有保存或阅读旧结果字段。
+- `requires_task_routing` 的正例写了更新、改目标、取消、恢复、重试，没有写保存或阅读旧结果。
+
+对照 Rasa CALM 官方文档后的结论：
+- 业务目标和操作拆轴成立。命令可以同时包含填槽和开启新流程；取消、闲聊、知识回答是系统模式，不是业务意图。
+- `force_slot_filling` 会吞掉新目标，不能用来处理追问。
+- “保存和读旧结果不能再出现 other 任务”在当前图上不成立。只改 `other` 文案会让这两类话失去执行器。取消、恢复、重试已经有独立执行器，才可以不建 other。
+
+## 2026-10-22 other 边界已改
+
+- `other` 保留天气、偏好、闲聊、确认事实、保存当前出差、阅读已返回结果。
+- 取消、恢复、重试、丢弃失败回合改为任务控制或失败恢复，并写入 `requires_task_routing` 正例。
+- `ROUTE_PROMPT` 要求只控制时不另建 other，保存和读旧结果不能丢掉。
+## 2026-10-22 JEV 只读复查
+
+- 未调用真实 JEV，未改业务代码。
+- 已观察：`hint()` 只保留不低于 0.8 的正例，不传 Choice `confidence`；`query_scope`、`transport`、`journey` 没有“未提及”选项。
+- 官方文档：Choice 总会返回最高概率选项，低置信度不应直接执行；Noul 中间值应交给另一条路径；`jev-latest` 是会移动的别名。
+## 2026-10-23 JEV 两点的建议改法
+
+- 范围、交通、往返不加入“未提及”枚举。同一次请求另问三道“是否明确提到”的 Noul，只有明确为是且 Choice confidence 达标才写入 hint。
+- `intents` 继续只放明确正例。另传 `undecided_intents`、`rejected_intents` 和 `requires_task_routing`。原路由不得把缺失当成否定。
+- 尚未改代码。
+
+## 2026-10-23 不确定意图的处理
+
+原先不确定的是：Noul 落在 0.2 和 0.8 之间时，回退给原路由后如何避免把“没放进 intents”当成否定。
+
+已打开的来源：
+- TypeSafe Confidence：高置信度自动执行，中间值谨慎处理，低置信度不要行动，可澄清或交给另一套系统。阈值按风险另定，不照搬示例数字。
+- TypeSafe Noul：没有单独 confidence，接近 0.5 就是没判清。官方多题示例用 0.8/0.2，中间值交给另一条路径，不直接当是或否。
+- TypeSafe confidence-routing：答案决定做什么，置信度决定是否行动。人工队列是示例路径，不是本项目已有路径。
+- Rasa CALM 对话理解：含义清楚就直接开始流程；多个流程同样可能或原话不精确时才 clarify。不把每次低置信度都做成确认问句。
+
+决定：
+- 直接建任务条件不变，0.8 不降低。
+- hint 增加 undecided_intents、rejected_intents，以及 requires_task_routing 的 yes/no/undecided。
+- 缺失或非法答案归入未决，不归入否定。
+- 原路由保留正例，不新建明确否定的意图。未决项先读原话；仍分不清含义或目标才澄清，且不能同时提交任务。
+- 不新增意图，不建人工队列，也不在中间概率时直接问用户。
+
+故意没照搬：TypeSafe 的人工复核队列、按 0.6 立即行动、Rasa 两阶段“是不是这个意图”确认。
+
+## 2026-10-23 中间区间不再单独重判
+
+- 0.2 到 0.8 不是丢弃。Jev 不直接建任务，整轮交给 TRAVEL_LLM_MODEL 的 TurnRoute。
+- 不另加一次只重判意图的 GPT/千问调用。语言模型用来读原话并决定新建、修改、控制或澄清。
+- 依据：TypeSafe 中间值交给另一套系统；Rasa 高置信度分类器可跳过 LLM，低置信度由 LLM 产出命令，不重跑同一分类。
+- 尚未改代码。若要加强，应在同一次 TurnRoute 里要求每个未决意图给出保留、不建或澄清。
+
+## 2026-10-30 JEV 阈值提议审查
+
+- 当前实现只有 `jev_intent_threshold`；`_decided` 使用 `p >= t` 或 `1-p >= t`，`_ternary` 同样由一个 t 同时派生 yes/no。提议指出的对称边界缺口真实存在。
+- `primary_route` 只在无现有任务/槽位/澄清且四个意图均已判定、`requires_task_routing` 判定为 no 时创建任务；否则仍走 TurnRoute。降低阈值会改变 JEV 直达分支和传给 TurnRoute 的 hint，不是纯指标参数。
+- 旧数据 `.verification/intent-accuracy-1130.json` 为 jev-1.13.0、98 个 ok 样本、392 个 Noul 观测。复算：accept/reject=(0.8,0.2) exact 79/98=0.8061、micro P=.9900、R=.8250；(0.6,0.15) exact 83/98=.8469、P=.9633、R=.8750，F1=.9170。该结果支持在离线集上做候选阈值实验，不支持直接发布。
+- 低概率正例并非全是标签错：<=.30 的 9 个正例中至少 `intent100-047`、`intent100-093` 是 policy_explain，且 `intent100-065` 的 other 是否应保留要按当前业务边界重新标注；不能据此断言“0.15 以下全是真负例”。按意图统计，other 在 <=.20 有 7 个 gold 正例，policy_explain 有 1 个。
+- 392 个观测混合四个不同 Noul 问题、每类只有 98 个样本，合并分箱不等于每类校准；当前证据没有 Brier/ECE、置信区间、独立校准集或新模型 `jev-latest` 结果。
+- 方案中的代价数值 C_FN=5、C_FP=1 只是主观设定，没有从真实用户澄清时延、TurnRoute 成功率、错误任务代价或政策漏判风险测量。由此得到的 0.17 只能作为敏感性分析点，不能作为生产阈值证明。
+- “reject 对离线意图指标零影响”只对不把 rejected 当作 actual 的静态分类指标成立；reject 会改变 undecided 数量、TurnRoute 负担、JEV 直达资格以及 hint 中的 rejected/undecided 语义，线上效果必须走 shadow/端到端评测。
+- 采纳方向：拆分独立 `jev_accept_threshold`/`jev_reject_threshold`，保留旧变量兼容；先 shadow 记录双阈值决策，再在冻结模型和盲测集上比较 false accept/false reject/clarification/TurnRoute 调用率/延迟/token/任务正确率。
+- 暂不采纳：直接把生产值改成 0.60/0.15、把 `reject<=0.15` 描述为真负例、把结果描述为“纯配置零代码变更”。
